@@ -64,7 +64,7 @@ const Sidebar: React.FC<SidebarProps> = ({ className = '' }) => {
   };
 
   return (
-    <div className={`flex flex-col h-full bg-white border-r border-gray-200 w-64 shadow-sm ${className}`}>
+    <div className={`flex flex-col h-full bg-white border-r border-gray-200 w-64 shadow-sm p-4 z-50 ${className}`} style={{ backgroundColor: 'white' }}>
       {/* Logo */}
       <div className="flex items-center h-16 px-6 border-b border-gray-200">
         <div className="flex items-center space-x-2">
@@ -129,9 +129,9 @@ const Sidebar: React.FC<SidebarProps> = ({ className = '' }) => {
                 <ul className="mt-1 pl-10 space-y-1">
                   <li>
                     <Link 
-                      href="/scrape/store" 
+                      href="/scrape-store" 
                       className={`block px-3 py-2 rounded-md text-sm transition-colors ${
-                        isActive('/scrape/store') 
+                        isActive('/scrape-store') 
                           ? 'text-indigo-600 font-medium' 
                           : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                       }`}
@@ -141,9 +141,9 @@ const Sidebar: React.FC<SidebarProps> = ({ className = '' }) => {
                   </li>
                   <li>
                     <Link 
-                      href="/scrape/auto" 
+                      href="/auto-scrape" 
                       className={`block px-3 py-2 rounded-md text-sm transition-colors ${
-                        isActive('/scrape/auto') 
+                        isActive('/auto-scrape') 
                           ? 'text-indigo-600 font-medium' 
                           : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                       }`}
@@ -153,9 +153,9 @@ const Sidebar: React.FC<SidebarProps> = ({ className = '' }) => {
                   </li>
                   <li>
                     <Link 
-                      href="/scrape/product" 
+                      href="/add-item" 
                       className={`block px-3 py-2 rounded-md text-sm transition-colors ${
-                        isActive('/scrape/product') 
+                        isActive('/add-item') 
                           ? 'text-indigo-600 font-medium' 
                           : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                       }`}
