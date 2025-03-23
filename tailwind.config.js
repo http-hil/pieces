@@ -6,16 +6,6 @@ export default {
   ],
   theme: {
     extend: {
-      colors: {
-        'slamjam': {
-          'bg': '#f7f7f7',
-          'text': '#1a1a1a',
-          'accent': '#ff4d00',
-          'muted': '#767676',
-          'border': '#e5e5e5',
-          'hover': '#f0f0f0',
-        }
-      },
       fontFamily: {
         'sans': ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
       },

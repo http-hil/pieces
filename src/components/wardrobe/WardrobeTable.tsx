@@ -1,8 +1,6 @@
 "use client";
 
 import { classNames } from "@/lib/utils/classNames";
-import { Badge } from "@/components/ui-core/Badge";
-import { Checkbox } from "@/components/ui-core/Checkbox";
 import {
   Table,
   TableBody,
@@ -12,23 +10,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui-core/Table";
+import { Checkbox } from "@/components/ui-core/Checkbox";
+import { Badge } from "@/components/ui-core/Badge";
 import { ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-
-type ClothingItem = {
-  id: number;
-  name: string;
-  created_at: string;
-  product_img: string | null;
-  tags: string;
-  url: string;
-  secondary_img: string | null;
-  description: string;
-  brand?: string;
-  category?: string;
-  color?: string;
-};
+import { ClothingItem } from "@/types";
 
 const columns: ColumnDef<ClothingItem>[] = [
   {
@@ -37,14 +24,14 @@ const columns: ColumnDef<ClothingItem>[] = [
       <Checkbox
         checked={table.getIsAllPageRowsSelected()}
         indeterminate={table.getIsSomePageRowsSelected() && !table.getIsAllPageRowsSelected()}
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+        onCheckedChange={(value: boolean) => table.toggleAllPageRowsSelected(!!value)}
         aria-label="Select all"
       />
     ),
     cell: ({ row }) => (
       <Checkbox
         checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
+        onCheckedChange={(value: boolean) => row.toggleSelected(!!value)}
         aria-label="Select row"
       />
     ),

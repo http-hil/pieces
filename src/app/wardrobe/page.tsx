@@ -89,7 +89,7 @@ export default function WardrobePage() {
     : items.filter(item => item.tags === filter);
 
   return (
-    <div className="pt-24 md:pt-28">
+    <div>
       <div className="container-slamjam">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-12">
           <h1 className="text-3xl font-medium uppercase tracking-tight mb-6 sm:mb-0">My Wardrobe</h1>
@@ -201,12 +201,12 @@ export default function WardrobePage() {
                 Refresh Items
               </button>
               <Link 
-                href="/test-db" 
+                href="/add-item" 
                 className="px-4 py-2 bg-[#ff4d00] text-white hover:bg-opacity-90 transition-colors"
                 tabIndex={0}
-                aria-label="Test database connection"
+                aria-label="Add your first item to the wardrobe"
               >
-                Test Database
+                Add Your First Item
               </Link>
             </div>
             <Link 
