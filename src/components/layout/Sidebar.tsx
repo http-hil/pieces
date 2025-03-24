@@ -64,7 +64,7 @@ const Sidebar: React.FC<SidebarProps> = ({ className = '' }) => {
   };
 
   return (
-    <div className={`flex flex-col h-full bg-white border-r border-gray-200 w-64 shadow-sm p-4 z-50 ${className}`} style={{ backgroundColor: 'white' }}>
+    <div className={`flex flex-col h-full bg-white w-full ${className}`}>
       {/* Logo */}
       <div className="flex items-center h-16 px-6 border-b border-gray-200">
         <div className="flex items-center space-x-2">
@@ -193,7 +193,7 @@ const Sidebar: React.FC<SidebarProps> = ({ className = '' }) => {
       </nav>
 
       {/* Settings */}
-      <div className="p-4 border-t border-gray-200">
+      <div className="p-4 border-t border-gray-200 mt-auto">
         <Link 
           href="/settings" 
           className="flex items-center gap-3 px-4 py-2.5 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"

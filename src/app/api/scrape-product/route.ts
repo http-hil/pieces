@@ -125,6 +125,101 @@ const extractProductInfo = (htmlContent: string, url: string) => {
   return result;
 };
 
+// Handler for A Day's March website
+const handleAdaysMarchProduct = async (url: string) => {
+  console.log('Handling A Day\'s March product URL:', url);
+  
+  try {
+    // Fetch the HTML content
+    const response = await fetch(url);
+    const htmlContent = await response.text();
+    
+    // Extract product name (usually in title or h1)
+    const nameMatch = htmlContent.match(/<h1[^>]*class="[^"]*product-title[^"]*"[^>]*>(.*?)<\/h1>/i) || 
+                      htmlContent.match(/<title[^>]*>(.*?)<\/title>/i);
+    const name = nameMatch ? nameMatch[1].trim().replace(' | A Day\'s March', '') : 'Unknown Product';
+    
+    // Extract price
+    const priceMatch = htmlContent.match(/data-product-price="(\d+(\.\d{2})?)"/i) ||
+                       htmlContent.match(/class="[^"]*product-price[^"]*"[^>]*>\s*\$?(\d+(\.\d{2})?)/i);
+    const price = priceMatch ? parseFloat(priceMatch[1]) : null;
+    const currency = '$'; // A Day's March uses USD
+    
+    // Extract images
+    const imageMatches = htmlContent.match(/data-srcset="([^"]+)"/g) || 
+                         htmlContent.match(/data-src="([^"]+)"/g);
+    
+    let image_url = null;
+    if (imageMatches && imageMatches.length > 0) {
+      // Extract the first image URL
+      const firstImageMatch = imageMatches[0].match(/data-srcset="([^"]+)"/i) || 
+                              imageMatches[0].match(/data-src="([^"]+)"/i);
+      if (firstImageMatch && firstImageMatch[1]) {
+        // Clean up the image URL (remove size parameters if needed)
+        image_url = firstImageMatch[1].split(' ')[0];
+      }
+    }
+    
+    // Extract color
+    let color = null;
+    const colorMatch = htmlContent.match(/data-option-name="Color"[^>]*data-option-value="([^"]+)"/i) ||
+                       htmlContent.match(/class="[^"]*product-option-value[^"]*"[^>]*>(.*?)<\/span>/i);
+    
+    if (colorMatch && colorMatch[1]) {
+      color = colorMatch[1].trim();
+    } else {
+      // Try to extract from product title or URL
+      const productTitle = name.toLowerCase();
+      const productUrl = url.toLowerCase();
+      
+      if (productTitle.includes('olive') || productUrl.includes('olive')) {
+        color = 'Olive';
+      } else if (productTitle.includes('black') || productUrl.includes('black')) {
+        color = 'Black';
+      } else if (productTitle.includes('navy') || productUrl.includes('navy')) {
+        color = 'Navy';
+      } else if (productTitle.includes('clay') || productUrl.includes('clay')) {
+        color = 'Clay';
+      }
+    }
+    
+    // Extract description
+    const descMatch = htmlContent.match(/<div[^>]*class="[^"]*product-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    let description = null;
+    if (descMatch && descMatch[1]) {
+      // Clean up the description (remove HTML tags)
+      description = descMatch[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+    
+    // Extract category
+    let category = 'overshirts';
+    if (url.includes('/men/')) {
+      const categoryMatch = url.match(/\/men\/([^\/]+)/);
+      if (categoryMatch && categoryMatch[1]) {
+        category = categoryMatch[1];
+      }
+    }
+    
+    const result = {
+      item_name: name,
+      brand: 'adaysmarch',
+      price,
+      currency,
+      item_category: category,
+      item_color: color,
+      image_url,
+      product_url: url,
+      item_description: description
+    };
+    
+    console.log('Extracted A Day\'s March product data:', result);
+    return result;
+  } catch (error) {
+    console.error('Error handling A Day\'s March product:', error);
+    throw error;
+  }
+};
+
 export async function POST(request: NextRequest) {
   try {
     const { url } = await request.json();
@@ -252,6 +347,27 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Handle A Day's March URLs
+    else if (url.includes('adaysmarch.com')) {
+      console.log('Detected A Day\'s March URL:', url);
+      
+      try {
+        const productData = await handleAdaysMarchProduct(url);
+        
+        return NextResponse.json({
+          success: true,
+          data: productData
+        });
+      } catch (error) {
+        console.error('Error processing A Day\'s March product:', error);
+        
+        return NextResponse.json(
+          { message: 'Failed to process A Day\'s March product' },
+          { status: 500 }
+        );
+      }
+    }
+    
     // Initialize Firecrawl app with API key from environment variable
     const app = new FirecrawlApp({ 
       apiKey: process.env.FIRECRAWL_API_KEY || 'fc-b4be050554f34ee394b0e7258861e331'

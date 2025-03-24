@@ -1,17 +1,17 @@
 "use client";
 
-import React, { ReactNode, useState } from 'react';
-import Sidebar from './Sidebar';
+import React, { useState } from 'react';
+import Sidebar from '@/components/layout/Sidebar';
 
-interface LayoutProps {
-  children: ReactNode;
-}
-
-const Layout: React.FC<LayoutProps> = ({ children }) => {
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div 
@@ -37,6 +37,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           <button
             onClick={() => setSidebarOpen(true)}
             className="text-gray-500 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+            aria-label="Open sidebar"
           >
             <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -84,6 +85,4 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </div>
     </div>
   );
-};
-
-export default Layout;
+}

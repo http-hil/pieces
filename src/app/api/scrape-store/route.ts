@@ -81,7 +81,7 @@ function getJobStatus(jobId: string): JobStatus | null {
   return jobStatuses.get(jobId) || null;
 }
 
-// Function to extract product data directly from HTML
+// Function to extract product cards directly from HTML
 function extractProductCardsFromHTML(html: string, baseUrl: string): Array<{
   url: string;
   name: string;
@@ -99,7 +99,70 @@ function extractProductCardsFromHTML(html: string, baseUrl: string): Array<{
       color: string;
     }> = [];
     
-    // Find all product cards
+    // Check if this is an A Day's March page
+    if (baseUrl.includes('adaysmarch.com')) {
+      // A Day's March specific extraction
+      $('.product-item').each((index: number, card: any) => {
+        try {
+          const $card = $(card);
+          
+          // Extract product URL
+          const relativeUrl = $card.find('a.product-item__link').attr('href');
+          const url = relativeUrl ? new URL(relativeUrl, baseUrl).toString() : '';
+          
+          // Extract product name
+          const name = $card.find('.product-item__title').text().trim();
+          
+          // Extract product price
+          const price = $card.find('.product-item__price').text().trim().replace(/[^\d.]/g, '');
+          
+          // Extract product image
+          const imageUrl = $card.find('.product-item__image img').attr('src') || 
+                          $card.find('.product-item__image img').attr('data-src') || '';
+          
+          // Extract color - A Day's March often has color in the product title or URL
+          let color = '';
+          if (name.toLowerCase().includes('olive')) {
+            color = 'Olive';
+          } else if (name.toLowerCase().includes('black')) {
+            color = 'Black';
+          } else if (name.toLowerCase().includes('navy')) {
+            color = 'Navy';
+          } else if (name.toLowerCase().includes('clay')) {
+            color = 'Clay';
+          } else {
+            // Try to extract from URL
+            const urlLower = url.toLowerCase();
+            if (urlLower.includes('olive')) {
+              color = 'Olive';
+            } else if (urlLower.includes('black')) {
+              color = 'Black';
+            } else if (urlLower.includes('navy')) {
+              color = 'Navy';
+            } else if (urlLower.includes('clay')) {
+              color = 'Clay';
+            }
+          }
+          
+          if (url && name && imageUrl) {
+            productCards.push({
+              url,
+              name,
+              price,
+              imageUrl,
+              color
+            });
+          }
+        } catch (cardError) {
+          console.error('Error extracting A Day\'s March product card data:', cardError);
+        }
+      });
+      
+      console.log(`Extracted ${productCards.length} A Day's March product cards`);
+      return productCards;
+    }
+    
+    // Original Stussy extraction logic
     $('.product-card').each((index: number, card: any) => {
       try {
         const $card = $(card);
@@ -154,6 +217,11 @@ function extractBrandFromUrl(url: string): string {
       return 'about-blank';
     }
     
+    // Special case for A Day's March
+    if (domain.join('.').includes('adaysmarch')) {
+      return 'adaysmarch';
+    }
+    
     // Common patterns for brand extraction
     if (domain.length >= 2) {
       // For domains like brand.com, eu.brand.com, etc.
@@ -175,6 +243,37 @@ function extractBrandFromUrl(url: string): string {
 function extractCategoryFromUrl(url: string): string {
   try {
     const urlObj = new URL(url);
+    
+    // Special case for A Day's March
+    if (url.includes('adaysmarch.com')) {
+      const pathParts = urlObj.pathname.split('/');
+      
+      // Check for men's category
+      if (pathParts.includes('men')) {
+        const menIndex = pathParts.findIndex(part => part === 'men');
+        
+        if (menIndex !== -1 && menIndex + 1 < pathParts.length) {
+          return pathParts[menIndex + 1];
+        }
+        
+        return 'men';
+      }
+      
+      // Check for women's category
+      if (pathParts.includes('women')) {
+        const womenIndex = pathParts.findIndex(part => part === 'women');
+        
+        if (womenIndex !== -1 && womenIndex + 1 < pathParts.length) {
+          return pathParts[womenIndex + 1];
+        }
+        
+        return 'women';
+      }
+      
+      return 'general';
+    }
+    
+    // Original Stussy logic
     const pathParts = urlObj.pathname.split('/');
     
     // Find the collections part
@@ -209,38 +308,73 @@ async function scrapeProductDetails(productUrl: string): Promise<{
   categories?: string[];
   price?: string;
 }> {
+  console.log(`Scraping additional details from ${productUrl}`);
+  
   try {
-    console.log(`Scraping details from ${productUrl}`);
+    // Initialize Firecrawl app with API key from environment variable
+    const app = new FirecrawlApp({ 
+      apiKey: process.env.FIRECRAWL_API_KEY || 'fc-b4be050554f34ee394b0e7258861e331'
+    });
     
-    // Normalize the URL to ensure it works without 'www.'
-    const normalizedUrl = normalizeUrl(productUrl);
+    // Scrape the product page
+    const scrapedData = await app.scrapeUrl(productUrl, {
+      formats: ['html']
+    }) as ScrapeResponse;
     
-    // Fetch the product page
-    const response = await fetch(normalizedUrl);
-    
-    if (!response.ok) {
-      console.error(`Failed to fetch product page: ${response.statusText}`);
+    if (!scrapedData || !scrapedData.data || !scrapedData.data.html) {
+      console.error('Failed to get HTML content from product page');
       return {};
     }
     
-    const html = await response.text();
+    const html = scrapedData.data.html;
     const $ = cheerio.load(html);
     
-    // Extract description
-    let description = '';
-    const descriptionElement = $('#productInformationDescription');
-    if (descriptionElement.length) {
-      description = descriptionElement.text().trim();
-    } else {
-      // Try alternative selectors for description
-      const altDescriptionElement = $('.product__description, .product-description, .product-single__description');
-      if (altDescriptionElement.length) {
-        description = altDescriptionElement.text().trim();
+    // Check if this is an A Day's March product
+    if (productUrl.includes('adaysmarch.com')) {
+      let color = '';
+      let productDescription = '';
+      let price = '';
+      
+      // Extract color
+      const colorElement = $('.product-option-value');
+      if (colorElement.length > 0) {
+        color = colorElement.text().trim();
       }
+      
+      // Extract description
+      const descriptionElement = $('.product-description');
+      if (descriptionElement.length > 0) {
+        productDescription = descriptionElement.text().trim();
+      }
+      
+      // Extract price
+      const priceElement = $('.product-price');
+      if (priceElement.length > 0) {
+        price = priceElement.text().trim().replace(/[^\d.]/g, '');
+      }
+      
+      // Extract categories
+      const categories: string[] = [];
+      const breadcrumbs = $('.breadcrumb-item');
+      breadcrumbs.each((index, element) => {
+        const category = $(element).text().trim().toLowerCase();
+        if (category && !category.includes('home') && !category.includes('a day\'s march')) {
+          categories.push(category);
+        }
+      });
+      
+      return {
+        color,
+        description: productDescription,
+        categories,
+        price
+      };
     }
     
-    // Extract color
+    // Original Stussy logic
     let color = '';
+    let description = '';
+    const categories: string[] = [];
     
     // Method 1: Look for color in product title or URL
     if (productUrl.includes('/products/')) {
@@ -301,10 +435,19 @@ async function scrapeProductDetails(productUrl: string): Promise<{
       }
     }
     
-    // Extract categories
-    const categories: string[] = [];
+    // Extract description
+    const descriptionElement = $('#productInformationDescription');
+    if (descriptionElement.length) {
+      description = descriptionElement.text().trim();
+    } else {
+      // Try alternative selectors for description
+      const altDescriptionElement = $('.product__description, .product-description, .product-single__description');
+      if (altDescriptionElement.length) {
+        description = altDescriptionElement.text().trim();
+      }
+    }
     
-    // Method 1: Look for category links in the product meta
+    // Extract categories
     const categoryElements = $('.product-meta__collections a, .product-categories a');
     categoryElements.each((_, element) => {
       categories.push($(element).text().trim());
@@ -1481,18 +1624,18 @@ async function scrapeProductPage(productUrl: string): Promise<any> {
     
     // Method 1: Look for breadcrumbs
     console.log(`Looking for breadcrumbs...`);
-    $('.breadcrumb, .breadcrumbs, .product-breadcrumb').find('a').each((_, element) => {
-      const category = $(element).text().trim().toLowerCase();
-      if (category && !category.includes('home') && !category.includes('products')) {
-        console.log(`Found category in breadcrumb: ${category}`);
-        categories.push(category);
+    $('.breadcrumb, .breadcrumbs, .breadcrumb-item a').each((_, element) => {
+      const text = $(element).text().trim();
+      // Skip home, index, or brand name links
+      if (text && !['home', 'index', 'stussy'].includes(text.toLowerCase())) {
+        categories.push(text);
       }
     });
     
     // Method 2: Look for category meta tags
     console.log(`Looking for category meta tags...`);
     $('meta[property="product:category"]').each((_, element) => {
-      const category = $(element).attr('content')?.trim().toLowerCase();
+      const category = $(element).attr('content')?.trim();
       if (category) {
         console.log(`Found category in meta tag: ${category}`);
         categories.push(category);
