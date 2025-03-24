@@ -48,7 +48,7 @@ interface ProductScrapeJob {
   savedProducts: Array<{ url: string; name: string }>;
   skippedProducts: Array<{ url: string; name?: string; reason: string }>;
   error?: string;
-  autoScrapeJobId?: string; // Store the auto-scrape job ID if provided
+  scrapeAutoJobId?: string; // Store the scrape-auto job ID if provided
 }
 
 // Extend the global namespace to include our job store
@@ -1036,7 +1036,7 @@ async function checkExistingProductsFromDomain(domain: string) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { storeUrl, maxProducts = 50, autoScrapeJobId } = await request.json();
+    const { storeUrl, maxProducts = 50, scrapeAutoJobId } = await request.json();
 
     if (!storeUrl) {
       return NextResponse.json(
@@ -1045,7 +1045,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`Starting scrape of store: ${storeUrl} with target of ${maxProducts} new products${autoScrapeJobId ? ` (part of auto-scrape job ${autoScrapeJobId})` : ''}`);
+    console.log(`Starting scrape of store: ${storeUrl} with target of ${maxProducts} new products${scrapeAutoJobId ? ` (part of scrape-auto job ${scrapeAutoJobId})` : ''}`);
     
     // Debug check for existing products if this is about---blank.com
     if (storeUrl.includes('about---blank.com')) {
@@ -1070,7 +1070,7 @@ export async function POST(request: NextRequest) {
         progress: 0,
         savedProducts: [],
         skippedProducts: [] as { url: string; name?: string; reason: string }[],
-        autoScrapeJobId // Store the auto-scrape job ID if provided
+        scrapeAutoJobId // Store the scrape-auto job ID if provided
       };
       
       // Initialize job status in the new system
@@ -1179,7 +1179,7 @@ export async function POST(request: NextRequest) {
       progress: 0,
       savedProducts: [],
       skippedProducts: [] as { url: string; name?: string; reason: string }[],
-      autoScrapeJobId // Store the auto-scrape job ID if provided
+      scrapeAutoJobId // Store the scrape-auto job ID if provided
     };
     
     // Initialize job status in the new system
@@ -1243,8 +1243,8 @@ async function processProductCards(jobId: string, storeUrl: string, maxProducts:
     const savedProducts: Array<{ url: string; name: string }> = [];
     const skippedProducts: Array<{ url: string; name?: string; reason: string }> = [];
     
-    // Track the auto-scrape job ID if it exists
-    const autoScrapeJobId = job.autoScrapeJobId;
+    // Track the scrape-auto job ID if it exists
+    const scrapeAutoJobId = job.scrapeAutoJobId;
     
     console.log(`Processing ${productCards.length} product cards for job ${jobId}`);
     console.log(`Target: ${maxProducts} new products to save`);
@@ -1377,9 +1377,9 @@ async function processProductCards(jobId: string, storeUrl: string, maxProducts:
     
     console.log(`Completed processing job ${jobId}. Saved ${savedCount} products, skipped ${skippedProducts.length} products.`);
     
-    // If this is part of an auto-scrape job, report back to the auto-scrape job
-    if (autoScrapeJobId) {
-      // TODO: Implement reporting back to the auto-scrape job
+    // If this is part of a scrape-auto job, report back to the scrape-auto job
+    if (scrapeAutoJobId) {
+      // TODO: Implement reporting back to the scrape-auto job
     }
   } catch (err: any) {
     console.error(`Error processing product cards for job ${jobId}:`, err);
@@ -1403,66 +1403,6 @@ async function processProductCards(jobId: string, storeUrl: string, maxProducts:
     }
     
     throw err;
-  }
-}
-
-export async function GET(request: NextRequest) {
-  try {
-    const url = new URL(request.url);
-    const jobId = url.searchParams.get('jobId');
-    const storeUrl = url.searchParams.get('storeUrl');
-    
-    if (!jobId) {
-      return NextResponse.json(
-        { message: 'Job ID is required' },
-        { status: 400 }
-      );
-    }
-    
-    // First check if the job exists in the new job status system
-    const jobStatus = getJobStatus(jobId);
-    
-    if (jobStatus) {
-      // Return the job status from the new system
-      return NextResponse.json({
-        status: jobStatus.status,
-        progress: jobStatus.progress,
-        message: jobStatus.message,
-        savedCount: jobStatus.savedCount || 0,
-        skippedCount: jobStatus.skippedCount || 0,
-        totalProcessed: jobStatus.totalProcessed || 0
-      });
-    }
-    
-    // Fallback to the old system if not found in the new one
-    if (!global.productScrapeJobs || !global.productScrapeJobs[jobId]) {
-      return NextResponse.json(
-        { message: 'Job not found' },
-        { status: 404 }
-      );
-    }
-    
-    const job = global.productScrapeJobs[jobId];
-    
-    // Return the job status and progress
-    return NextResponse.json({
-      status: job.status,
-      progress: job.progress,
-      savedProducts: job.savedProducts,
-      skippedProducts: job.skippedProducts,
-      error: job.error,
-      totalProcessed: job.savedProducts.length + job.skippedProducts.length,
-      savedCount: job.savedProducts.length,
-      skippedCount: job.skippedProducts.length,
-      targetProducts: job.savedProducts.length >= 1 ? job.savedProducts.length : 0,
-      storeUrl: job.storeUrl
-    });
-  } catch (error) {
-    console.error('Error in scrape-store status API:', error);
-    return NextResponse.json(
-      { message: 'Internal server error', error },
-      { status: 500 }
-    );
   }
 }
 
@@ -1713,5 +1653,65 @@ async function scrapeProductPage(productUrl: string): Promise<any> {
   } catch (error) {
     console.error(`Error scraping product page: ${error}`);
     return {};
+  }
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const url = new URL(request.url);
+    const jobId = url.searchParams.get('jobId');
+    const storeUrl = url.searchParams.get('storeUrl');
+    
+    if (!jobId) {
+      return NextResponse.json(
+        { message: 'Job ID is required' },
+        { status: 400 }
+      );
+    }
+    
+    // First check if the job exists in the new job status system
+    const jobStatus = getJobStatus(jobId);
+    
+    if (jobStatus) {
+      // Return the job status from the new system
+      return NextResponse.json({
+        status: jobStatus.status,
+        progress: jobStatus.progress,
+        message: jobStatus.message,
+        savedCount: jobStatus.savedCount || 0,
+        skippedCount: jobStatus.skippedCount || 0,
+        totalProcessed: jobStatus.totalProcessed || 0
+      });
+    }
+    
+    // Fallback to the old system if not found in the new one
+    if (!global.productScrapeJobs || !global.productScrapeJobs[jobId]) {
+      return NextResponse.json(
+        { message: 'Job not found' },
+        { status: 404 }
+      );
+    }
+    
+    const job = global.productScrapeJobs[jobId];
+    
+    // Return the job status and progress
+    return NextResponse.json({
+      status: job.status,
+      progress: job.progress,
+      savedProducts: job.savedProducts,
+      skippedProducts: job.skippedProducts,
+      error: job.error,
+      totalProcessed: job.savedProducts.length + job.skippedProducts.length,
+      savedCount: job.savedProducts.length,
+      skippedCount: job.skippedProducts.length,
+      targetProducts: job.savedProducts.length >= 1 ? job.savedProducts.length : 0,
+      storeUrl: job.storeUrl
+    });
+  } catch (error) {
+    console.error('Error in scrape-store status API:', error);
+    return NextResponse.json(
+      { message: 'Internal server error', error },
+      { status: 500 }
+    );
   }
 }

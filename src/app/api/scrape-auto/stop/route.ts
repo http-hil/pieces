@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     job.endTime = new Date();
     global.autoScrapeJobs.set(jobId, job);
     
-    console.log(`[AUTO-SCRAPE] Job ${jobId} has been stopped manually`);
+    console.log(`[SCRAPE-AUTO] Job ${jobId} has been stopped manually`);
     
     return NextResponse.json({ 
       success: true, 
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
       job
     });
   } catch (error) {
-    console.error('[AUTO-SCRAPE] Error stopping job:', error);
+    console.error('[SCRAPE-AUTO] Error stopping job:', error);
     return NextResponse.json({ 
       success: false, 
       message: 'Error stopping job', 

@@ -29,9 +29,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       console.warn('[DAILY-SCRAPE] NEXT_PUBLIC_APP_URL is not set. Using default localhost:3000');
     }
     
-    const apiUrl = `${baseUrl || 'http://localhost:3000'}/api/auto-scrape`;
+    const apiUrl = `${baseUrl || 'http://localhost:3000'}/api/scrape-auto`;
     
-    // Call the auto-scrape API to start the scraping process
+    // Call the scrape-auto API to start the scraping process
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -42,12 +42,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(`Failed to start auto-scrape: ${errorData.error || response.statusText}`);
+      throw new Error(`Failed to start scrape-auto: ${errorData.error || response.statusText}`);
     }
     
     const data = await response.json();
     
-    console.log(`[DAILY-SCRAPE] Auto-scrape job started successfully with ID: ${data.jobId}`);
+    console.log(`[DAILY-SCRAPE] Scrape-auto job started successfully with ID: ${data.jobId}`);
     
     return NextResponse.json({
       success: true,

@@ -24,7 +24,7 @@ export default function AutoScrapePage() {
   const [jobStatus, setJobStatus] = useState<AutoScrapeJob | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Function to start a new auto-scrape job
+  // Function to start a new scrape-auto job
   const startAutoScrape = async () => {
     setIsLoading(true);
     setError(null);
@@ -32,7 +32,7 @@ export default function AutoScrapePage() {
     setJobStatus(null);
 
     try {
-      const response = await fetch('/api/auto-scrape', {
+      const response = await fetch('/api/scrape-auto', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -43,7 +43,7 @@ export default function AutoScrapePage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to start auto-scrape job');
+        throw new Error(data.error || 'Failed to start scrape-auto job');
       }
 
       setJobId(data.jobId);
@@ -54,14 +54,14 @@ export default function AutoScrapePage() {
     }
   };
 
-  // Function to stop the auto-scrape process
+  // Function to stop the scrape-auto process
   const stopAutoScrape = async () => {
     if (!jobId) return;
 
     setIsStopping(true);
 
     try {
-      const response = await fetch('/api/auto-scrape/stop', {
+      const response = await fetch('/api/scrape-auto/stop', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -80,22 +80,22 @@ export default function AutoScrapePage() {
           });
         }
       } else {
-        setError(data.message || 'Failed to stop auto-scrape');
+        setError(data.message || 'Failed to stop scrape-auto');
       }
     } catch (error) {
-      console.error('Error stopping auto-scrape:', error);
-      setError('An error occurred while stopping the auto-scrape');
+      console.error('Error stopping scrape-auto:', error);
+      setError('An error occurred while stopping the scrape-auto');
     } finally {
       setIsStopping(false);
     }
   };
 
-  // Function to check the status of an auto-scrape job
+  // Function to check the status of a scrape-auto job
   const checkJobStatus = async () => {
     if (!jobId) return;
 
     try {
-      const response = await fetch(`/api/auto-scrape?jobId=${jobId}`);
+      const response = await fetch(`/api/scrape-auto?jobId=${jobId}`);
       const data = await response.json();
 
       if (!response.ok) {
@@ -124,7 +124,7 @@ export default function AutoScrapePage() {
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Auto Scrape - Stüssy Collections</h1>
+      <h1 className="text-2xl font-bold mb-4">Scrape-Auto - Stüssy Collections</h1>
       
       <div className="mb-6 p-4 bg-gray-100 rounded-lg">
         <p className="mb-4">
@@ -150,7 +150,7 @@ export default function AutoScrapePage() {
             ) : (
               <>
                 <ArrowPathIcon className="h-5 w-5" />
-                <span>Start Auto Scrape</span>
+                <span>Start Scrape-Auto</span>
               </>
             )}
           </button>
@@ -256,7 +256,7 @@ export default function AutoScrapePage() {
               
               {jobStatus.status === 'completed' && (
                 <div className="mt-4 p-4 bg-green-100 rounded-lg">
-                  <h3 className="text-lg font-semibold text-green-800">Auto-Scrape Completed</h3>
+                  <h3 className="text-lg font-semibold text-green-800">Scrape-Auto Completed</h3>
                   <p className="text-green-700">
                     Successfully processed {jobStatus.processedPages} of {jobStatus.totalPages} collections.
                   </p>
@@ -268,16 +268,16 @@ export default function AutoScrapePage() {
                     </ul>
                   </div>
                   <p className="mt-3 text-sm text-green-600">
-                    The next scheduled auto-scrape will run at midnight UTC.
+                    The next scheduled scrape-auto will run at midnight UTC.
                   </p>
                 </div>
               )}
               
               {jobStatus.status === 'stopped' && (
                 <div className="mt-4 p-4 bg-yellow-100 rounded-lg">
-                  <h3 className="text-lg font-semibold text-yellow-800">Auto-Scrape Stopped</h3>
+                  <h3 className="text-lg font-semibold text-yellow-800">Scrape-Auto Stopped</h3>
                   <p className="text-yellow-700">
-                    The auto-scrape process was manually stopped after processing {jobStatus.processedPages} of {jobStatus.totalPages} collections.
+                    The scrape-auto process was manually stopped after processing {jobStatus.processedPages} of {jobStatus.totalPages} collections.
                   </p>
                   <div className="mt-2">
                     <p className="font-medium">Partial Results:</p>
@@ -287,7 +287,7 @@ export default function AutoScrapePage() {
                     </ul>
                   </div>
                   <p className="mt-3 text-sm text-yellow-600">
-                    You can start a new auto-scrape job to continue processing the remaining collections.
+                    You can start a new scrape-auto job to continue processing the remaining collections.
                   </p>
                 </div>
               )}

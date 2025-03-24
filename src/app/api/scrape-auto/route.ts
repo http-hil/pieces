@@ -34,7 +34,7 @@ function generateJobId(): string {
 // Function to get all collection URLs from Stüssy website
 async function getAllCollectionUrls(): Promise<string[]> {
   try {
-    console.log('[AUTO-SCRAPE] Discovering all collection URLs...');
+    console.log('[SCRAPE-AUTO] Discovering all collection URLs...');
     
     // Define the base URL for Stüssy
     const baseUrl = 'https://eu.stussy.com';
@@ -56,10 +56,10 @@ async function getAllCollectionUrls(): Promise<string[]> {
       'https://eu.stussy.com/collections/womens'
     ];
     
-    console.log(`[AUTO-SCRAPE] Found ${collectionUrls.length} collection URLs`);
+    console.log(`[SCRAPE-AUTO] Found ${collectionUrls.length} collection URLs`);
     return collectionUrls;
   } catch (error) {
-    console.error('[AUTO-SCRAPE] Error getting collection URLs:', error);
+    console.error('[SCRAPE-AUTO] Error getting collection URLs:', error);
     throw error;
   }
 }
@@ -70,12 +70,12 @@ async function scrapeCollectionPage(collectionUrl: string, jobId: string): Promi
   skippedCount: number;
 }> {
   try {
-    console.log(`[AUTO-SCRAPE] Scraping collection: ${collectionUrl}`);
+    console.log(`[SCRAPE-AUTO] Scraping collection: ${collectionUrl}`);
     
     // Check if the job has been stopped
     const job = global.autoScrapeJobs.get(jobId);
     if (!job || job.status === 'stopped') {
-      console.log(`[AUTO-SCRAPE] Job ${jobId} has been stopped, skipping collection: ${collectionUrl}`);
+      console.log(`[SCRAPE-AUTO] Job ${jobId} has been stopped, skipping collection: ${collectionUrl}`);
       return { savedCount: 0, skippedCount: 0 };
     }
     
@@ -83,7 +83,7 @@ async function scrapeCollectionPage(collectionUrl: string, jobId: string): Promi
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
     
     if (!baseUrl) {
-      console.warn('[AUTO-SCRAPE] NEXT_PUBLIC_APP_URL is not set. Using default localhost:3000');
+      console.warn('[SCRAPE-AUTO] NEXT_PUBLIC_APP_URL is not set. Using default localhost:3000');
     }
     
     const apiUrl = `${baseUrl || 'http://localhost:3000'}/api/scrape-store`;
@@ -145,14 +145,14 @@ async function scrapeCollectionPage(collectionUrl: string, jobId: string): Promi
       }
     }
     
-    console.log(`[AUTO-SCRAPE] Completed scraping ${collectionUrl}: Saved ${savedCount}, Skipped ${skippedCount}`);
+    console.log(`[SCRAPE-AUTO] Completed scraping ${collectionUrl}: Saved ${savedCount}, Skipped ${skippedCount}`);
     
     return {
       savedCount,
       skippedCount
     };
   } catch (error) {
-    console.error(`[AUTO-SCRAPE] Error scraping collection ${collectionUrl}:`, error);
+    console.error(`[SCRAPE-AUTO] Error scraping collection ${collectionUrl}:`, error);
     throw error;
   }
 }
@@ -170,14 +170,14 @@ async function processCollections(jobId: string, collectionUrls: string[]) {
     job.status = 'processing';
     global.autoScrapeJobs.set(jobId, job);
     
-    console.log(`[AUTO-SCRAPE] Starting to process ${collectionUrls.length} collections for job ${jobId}`);
+    console.log(`[SCRAPE-AUTO] Starting to process ${collectionUrls.length} collections for job ${jobId}`);
     
     // Process each collection
     for (let i = 0; i < collectionUrls.length; i++) {
       // Check if the job has been stopped
       const currentJob = global.autoScrapeJobs.get(jobId);
       if (!currentJob || currentJob.status === 'stopped') {
-        console.log(`[AUTO-SCRAPE] Job ${jobId} has been stopped, stopping processing`);
+        console.log(`[SCRAPE-AUTO] Job ${jobId} has been stopped, stopping processing`);
         break;
       }
       
@@ -196,7 +196,7 @@ async function processCollections(jobId: string, collectionUrls: string[]) {
           global.autoScrapeJobs.set(jobId, updatedJob);
         }
       } catch (error) {
-        console.error(`[AUTO-SCRAPE] Error processing collection ${collectionUrl}:`, error);
+        console.error(`[SCRAPE-AUTO] Error processing collection ${collectionUrl}:`, error);
         // Continue with the next collection even if this one fails
       }
     }
@@ -211,9 +211,9 @@ async function processCollections(jobId: string, collectionUrls: string[]) {
       global.autoScrapeJobs.set(jobId, finalJob);
     }
     
-    console.log(`[AUTO-SCRAPE] Finished processing collections for job ${jobId}`);
+    console.log(`[SCRAPE-AUTO] Finished processing collections for job ${jobId}`);
   } catch (error) {
-    console.error('[AUTO-SCRAPE] Error processing collections:', error);
+    console.error('[SCRAPE-AUTO] Error processing collections:', error);
     
     // Update job status to error
     const job = global.autoScrapeJobs.get(jobId);
@@ -226,7 +226,7 @@ async function processCollections(jobId: string, collectionUrls: string[]) {
   }
 }
 
-// POST handler to start a new auto-scrape job
+// POST handler to start a new scrape-auto job
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     // Generate a unique job ID
@@ -255,21 +255,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     
     return NextResponse.json({
       success: true,
-      message: 'Auto-scrape job started',
+      message: 'Scrape-auto job started',
       jobId,
       totalPages: collectionUrls.length
     });
   } catch (error) {
-    console.error('[AUTO-SCRAPE] Error starting auto-scrape job:', error);
+    console.error('[SCRAPE-AUTO] Error starting scrape-auto job:', error);
     return NextResponse.json({
       success: false,
-      message: 'Error starting auto-scrape job',
+      message: 'Error starting scrape-auto job',
       error: (error as Error).message
     }, { status: 500 });
   }
 }
 
-// GET handler to check the status of an auto-scrape job
+// GET handler to check the status of a scrape-auto job
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     // Get the job ID from the query string
@@ -299,10 +299,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       job
     });
   } catch (error) {
-    console.error('[AUTO-SCRAPE] Error getting auto-scrape job status:', error);
+    console.error('[SCRAPE-AUTO] Error getting scrape-auto job status:', error);
     return NextResponse.json({
       success: false,
-      message: 'Error getting auto-scrape job status',
+      message: 'Error getting scrape-auto job status',
       error: (error as Error).message
     }, { status: 500 });
   }

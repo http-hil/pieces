@@ -6,9 +6,9 @@ This guide explains how to set up the automated daily scraping of Stüssy collec
 
 The automated scraping system includes:
 
-1. An API endpoint (`/api/auto-scrape`) that handles the scraping process
+1. An API endpoint (`/api/scrape-auto`) that handles the scraping process
 2. A cron endpoint (`/api/cron/daily-scrape`) that triggers the scraping
-3. A UI page (`/auto-scrape`) to monitor and manually trigger the scraping
+3. A UI page (`/scrape-auto`) to monitor and manually trigger the scraping
 
 ## Setting Up the Cron Job
 
@@ -64,7 +64,7 @@ You can set these variables in your deployment platform's environment variables 
 
 ## Testing the Setup
 
-1. Navigate to `/auto-scrape` in your browser
+1. Navigate to `/scrape-auto` in your browser
 2. Click "Start Auto Scrape" to manually trigger the process
 3. Monitor the progress and results
 
@@ -83,7 +83,7 @@ curl -X GET -H "Authorization: Bearer YOUR_CRON_SECRET" https://your-domain.com/
 
 ## Monitoring
 
-The auto-scrape page (`/auto-scrape`) provides a UI to monitor the status of scraping jobs. You can:
+The scrape-auto page (`/scrape-auto`) provides a UI to monitor the status of scraping jobs. You can:
 
 1. View the progress of the current job
 2. See which collections have been processed

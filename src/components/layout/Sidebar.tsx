@@ -141,9 +141,9 @@ const Sidebar: React.FC<SidebarProps> = ({ className = '' }) => {
                   </li>
                   <li>
                     <Link 
-                      href="/auto-scrape" 
+                      href="/scrape-auto" 
                       className={`block px-3 py-2 rounded-md text-sm transition-colors ${
-                        isActive('/auto-scrape') 
+                        isActive('/scrape-auto') 
                           ? 'text-indigo-600 font-medium' 
                           : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                       }`}
