@@ -1,6 +1,7 @@
 import { supabase } from '../../../utils/supabase';
 import Link from 'next/link';
 import Image from 'next/image';
+import { Heading } from '@/components/heading';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -18,7 +19,9 @@ export default async function ServerWardrobePage() {
     console.error('Server: Error fetching items:', error);
     return (
       <div className="container mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-6">My Wardrobe</h1>
+        <div className="flex justify-between items-center mb-6">
+          <Heading>My Wardrobe</Heading>
+        </div>
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
           <p>Error loading items: {error.message}</p>
         </div>
@@ -31,13 +34,13 @@ export default async function ServerWardrobePage() {
   if (!data || data.length === 0) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-6">My Wardrobe (Server)</h1>
-        <p className="text-gray-600">No items found in your wardrobe.</p>
-        <div className="mt-4">
+        <div className="flex justify-between items-center mb-6">
+          <Heading>My Wardrobe (Server)</Heading>
           <Link href="/add-item" className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
             Add Your First Item
           </Link>
         </div>
+        <p className="text-gray-600">No items found in your wardrobe.</p>
       </div>
     );
   }
@@ -47,9 +50,8 @@ export default async function ServerWardrobePage() {
   
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">My Wardrobe (Server)</h1>
-      
-      <div className="mb-6">
+      <div className="flex justify-between items-center mb-6">
+        <Heading>My Wardrobe (Server)</Heading>
         <Link href="/add-item" className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
           Add New Item
         </Link>

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { supabase } from '../../../../utils/supabase';
+import { Heading } from '@/components/heading';
 
 type ClothingItem = {
   id: number;
@@ -124,7 +125,7 @@ export default function ItemDetailPage({ params }: { params: { id: string } }) {
             {item.brand && (
               <h2 className="text-xl font-medium text-gray-700 mb-1">{item.brand}</h2>
             )}
-            <h1 className="text-2xl font-bold mb-4">{item.name}</h1>
+            <Heading>{item.name}</Heading>
             
             {item.tags && item.tags.includes('price:') && (
               <p className="text-xl font-semibold mb-4">

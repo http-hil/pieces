@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../utils/supabase';
+import { Heading } from '@/components/heading';
 
 type ScrapedProduct = {
   item_name: string;
@@ -128,7 +129,7 @@ export default function AddItemPage() {
 
   return (
     <div className="container mx-auto p-4 sm:p-6 max-w-3xl">
-      <h1 className="text-3xl font-bold mb-6">Add Item to Wardrobe</h1>
+      <Heading>Add Item to Wardrobe</Heading>
       
       <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
         <h2 className="text-xl font-semibold mb-4">Paste a Product URL</h2>

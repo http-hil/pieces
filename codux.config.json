@@ -1,0 +1,3 @@
+{  
+  "boardGlobalSetup": "./src/boards-global-setup.ts"
+}

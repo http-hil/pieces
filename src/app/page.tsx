@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="pt-20 md:pt-24">
+    <div>
       {/* Hero Section */}
       <div className="container-slamjam">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center py-16 md:py-24">

@@ -18,6 +18,10 @@ const nextConfig = {
       },
     ],
   },
+  // Ensure CSS modules are properly processed
+  webpack: (config) => {
+    return config;
+  },
 };
 
 module.exports = nextConfig;

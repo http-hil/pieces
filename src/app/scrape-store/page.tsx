@@ -1,6 +1,21 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/table';
+import { Button } from '@/components/button';
+import { PlusCircle, RefreshCw } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+
+type Store = {
+  id: number;
+  brand: string;        // maps to 'name' in Supabase stores table
+  store_url: string;    // maps to 'url' in Supabase stores table
+  last_scraped_at: string | null; // maps to 'last_scraped' in Supabase stores table
+  items_count: number;  // maps to 'total_items_scraped' in Supabase stores table
+  created_at: string;   // not in Supabase stores table, but kept for compatibility
+  updated_at: string;   // not in Supabase stores table, but kept for compatibility
+  firecrawl_code?: string | null; // New field from Supabase stores table
+};
 
 type SavedProduct = {
   url: string;
@@ -13,20 +28,93 @@ type SkippedProduct = {
 };
 
 export default function ScrapeStorePage() {
-  const [storeUrl, setStoreUrl] = useState('https://eu.stussy.com/collections/new-arrivals');
+  const [stores, setStores] = useState<Store[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isAddingStore, setIsAddingStore] = useState(false);
+  const [newStoreBrand, setNewStoreBrand] = useState('');
+  const [newStoreUrl, setNewStoreUrl] = useState('');
   const [maxProducts, setMaxProducts] = useState(10);
+  
+  // Scraping state
+  const [activeScrapingStore, setActiveScrapingStore] = useState<Store | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [savedProducts, setSavedProducts] = useState<Array<SavedProduct>>([]);
   const [skippedProducts, setSkippedProducts] = useState<Array<SkippedProduct>>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  // Fetch stores on component mount
+  useEffect(() => {
+    fetchStores();
+  }, []);
+
+  // Function to fetch stores
+  const fetchStores = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch('/api/scrape-stores');
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch stores');
+      }
+      
+      setStores(data.stores || []);
+    } catch (err: any) {
+      setError(err.message || 'An error occurred while fetching stores');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Function to add a new store
+  const addStore = async () => {
+    if (!newStoreBrand || !newStoreUrl) {
+      setError('Brand and URL are required');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch('/api/scrape-stores', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          brand: newStoreBrand,
+          store_url: newStoreUrl,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to add store');
+      }
+      
+      // Reset form and fetch updated stores
+      setNewStoreBrand('');
+      setNewStoreUrl('');
+      setIsAddingStore(false);
+      fetchStores();
+    } catch (err: any) {
+      setError(err.message || 'An error occurred while adding the store');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Function to start the scraping process
-  const startScraping = async () => {
+  const startScraping = async (store: Store) => {
     try {
+      setActiveScrapingStore(store);
       setLoading(true);
       setError(null);
       setJobId(null);
@@ -36,23 +124,32 @@ export default function ScrapeStorePage() {
       setSavedProducts([]);
       setSkippedProducts([]);
 
+      console.log(`Starting scrape for store: ${store.brand} (${store.store_url})`);
+
       const response = await fetch('/api/scrape-store', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ storeUrl, maxProducts }),
+        body: JSON.stringify({ 
+          storeUrl: store.store_url, 
+          maxProducts 
+        }),
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to start scraping');
+        const errorText = await response.text();
+        console.error('Scrape store API error:', errorText);
+        throw new Error(`Failed to start scraping: ${response.status} ${response.statusText}`);
       }
+
+      const data = await response.json();
+      console.log('Scrape store API response:', data);
 
       setJobId(data.jobId);
       setStatus(data.status);
     } catch (err: any) {
+      console.error('Error in startScraping:', err);
       setError(err.message || 'An error occurred');
     } finally {
       setLoading(false);
@@ -61,15 +158,20 @@ export default function ScrapeStorePage() {
 
   // Function to check the status of the scraping job
   const checkStatus = async () => {
-    if (!jobId) return;
+    if (!jobId || !activeScrapingStore) return;
 
     try {
-      const response = await fetch(`/api/scrape-store?jobId=${jobId}&storeUrl=${encodeURIComponent(storeUrl)}`);
-      const data = await response.json();
-
+      console.log(`Checking status for job: ${jobId}`);
+      const response = await fetch(`/api/scrape-store?jobId=${jobId}&storeUrl=${encodeURIComponent(activeScrapingStore.store_url)}`);
+      
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to check status');
+        const errorText = await response.text();
+        console.error('Status check API error:', errorText);
+        throw new Error(`Failed to check status: ${response.status} ${response.statusText}`);
       }
+
+      const data = await response.json();
+      console.log('Status check API response:', data);
 
       setStatus(data.status);
       
@@ -99,7 +201,13 @@ export default function ScrapeStorePage() {
       if (data.message) {
         setStatusMessage(data.message);
       }
+      
+      // If the job is completed, refresh the stores list
+      if (data.status === 'completed') {
+        fetchStores();
+      }
     } catch (err: any) {
+      console.error('Error in checkStatus:', err);
       setError(err.message || 'An error occurred while checking status');
     }
   };
@@ -114,48 +222,15 @@ export default function ScrapeStorePage() {
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Store Scraper</h1>
-      
-      <div className="mb-6 p-4 bg-gray-100 rounded-lg">
-        <div className="mb-4">
-          <label htmlFor="storeUrl" className="block text-sm font-medium text-gray-700 mb-1">
-            Store URL
-          </label>
-          <input
-            type="text"
-            id="storeUrl"
-            value={storeUrl}
-            onChange={(e) => setStoreUrl(e.target.value)}
-            className="w-full p-2 border border-gray-300 rounded"
-            placeholder="https://example.com/collections/all"
-          />
-        </div>
-        
-        <div className="mb-4">
-          <label htmlFor="maxProducts" className="block text-sm font-medium text-gray-700 mb-1">
-            New Products to Save
-          </label>
-          <input
-            type="number"
-            id="maxProducts"
-            value={maxProducts}
-            onChange={(e) => setMaxProducts(parseInt(e.target.value))}
-            className="w-full p-2 border border-gray-300 rounded"
-            min="1"
-            max="100"
-          />
-          <p className="mt-1 text-sm text-gray-500">
-            The scraper will continue until this many new products are saved, even if some are skipped.
-          </p>
-        </div>
-        
-        <button
-          onClick={startScraping}
-          disabled={loading}
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Store Scraper</h1>
+        <Button 
+          onClick={() => setIsAddingStore(true)}
+          className="flex items-center gap-2"
         >
-          {loading ? 'Starting...' : 'Start Scraping'}
-        </button>
+          <PlusCircle size={16} />
+          Add Store
+        </Button>
       </div>
       
       {error && (
@@ -164,10 +239,141 @@ export default function ScrapeStorePage() {
         </div>
       )}
       
-      {jobId && (
-        <div className="mb-4 p-4 bg-gray-100 rounded-lg">
-          <h2 className="text-xl font-semibold mb-2">Job Status</h2>
-          <p className="mb-2">Job ID: {jobId}</p>
+      {isAddingStore && (
+        <div className="mb-6 p-4 bg-gray-100 rounded-lg">
+          <h2 className="text-lg font-semibold mb-3">Add New Store</h2>
+          
+          <div className="mb-4">
+            <label htmlFor="brand" className="block text-sm font-medium text-gray-700 mb-1">
+              Brand Name
+            </label>
+            <input
+              type="text"
+              id="brand"
+              value={newStoreBrand}
+              onChange={(e) => setNewStoreBrand(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+              placeholder="e.g., Stussy"
+            />
+          </div>
+          
+          <div className="mb-4">
+            <label htmlFor="storeUrl" className="block text-sm font-medium text-gray-700 mb-1">
+              Store URL
+            </label>
+            <input
+              type="text"
+              id="storeUrl"
+              value={newStoreUrl}
+              onChange={(e) => setNewStoreUrl(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+              placeholder="https://example.com/collections/all"
+            />
+          </div>
+          
+          <div className="flex gap-2">
+            <Button onClick={addStore} disabled={loading}>
+              {loading ? 'Adding...' : 'Add Store'}
+            </Button>
+            <Button 
+              outline
+              onClick={() => {
+                setIsAddingStore(false);
+                setNewStoreBrand('');
+                setNewStoreUrl('');
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      
+      <div className="mb-4">
+        <label htmlFor="maxProducts" className="block text-sm font-medium text-gray-700 mb-1">
+          New Products to Save Per Scrape
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            id="maxProducts"
+            value={maxProducts}
+            onChange={(e) => setMaxProducts(parseInt(e.target.value))}
+            className="w-32 p-2 border border-gray-300 rounded"
+            min="1"
+            max="100"
+          />
+          <span className="text-sm text-gray-500">
+            The scraper will continue until this many new products are saved.
+          </span>
+        </div>
+      </div>
+      
+      {loading && !isAddingStore && !activeScrapingStore && (
+        <div className="text-center py-4">Loading stores...</div>
+      )}
+      
+      {!loading && stores.length === 0 && !isAddingStore && (
+        <div className="text-center py-8">
+          <p className="text-gray-500 mb-4">No stores have been added yet.</p>
+          <Button onClick={() => setIsAddingStore(true)}>Add Your First Store</Button>
+        </div>
+      )}
+      
+      {stores.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-gray-200">
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeader>Brand</TableHeader>
+                <TableHeader>Store URL</TableHeader>
+                <TableHeader>Last Scraped</TableHeader>
+                <TableHeader>Items Count</TableHeader>
+                <TableHeader>Actions</TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {stores.map((store) => (
+                <TableRow key={store.id}>
+                  <TableCell className="font-medium">{store.brand}</TableCell>
+                  <TableCell>
+                    <a 
+                      href={store.store_url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:underline truncate block max-w-xs"
+                    >
+                      {store.store_url}
+                    </a>
+                  </TableCell>
+                  <TableCell>
+                    {store.last_scraped_at 
+                      ? formatDistanceToNow(new Date(store.last_scraped_at), { addSuffix: true }) 
+                      : 'Never'}
+                  </TableCell>
+                  <TableCell>{store.items_count}</TableCell>
+                  <TableCell>
+                    <Button 
+                      outline
+                      className="flex items-center gap-1"
+                      onClick={() => startScraping(store)}
+                      disabled={activeScrapingStore !== null}
+                    >
+                      <RefreshCw size={14} />
+                      Scrape Now
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      
+      {activeScrapingStore && jobId && (
+        <div className="mt-6 p-4 bg-gray-100 rounded-lg">
+          <h2 className="text-xl font-semibold mb-2">Scraping {activeScrapingStore.brand}</h2>
+          <p className="mb-2 text-sm text-gray-600">{activeScrapingStore.store_url}</p>
           <p className="mb-2">Status: {status}</p>
           {statusMessage && (
             <p className="mb-2 text-gray-600">{statusMessage}</p>
@@ -194,9 +400,6 @@ export default function ScrapeStorePage() {
                   <>No products skipped yet</>
                 )}
               </p>
-              <p className="text-gray-600 mt-1 text-xs">
-                The scraper will continue until {maxProducts} new products are saved, even if some are skipped.
-              </p>
             </div>
           )}
           
@@ -204,12 +407,13 @@ export default function ScrapeStorePage() {
             <div className="mt-2 p-3 bg-red-100 text-red-700 rounded">
               <p>An error occurred during scraping. Please try again.</p>
               {statusMessage && <p className="mt-2 text-sm">{statusMessage}</p>}
-              <button
-                onClick={startScraping}
-                className="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+              <Button
+                onClick={() => startScraping(activeScrapingStore)}
+                className="mt-3"
+                color="red"
               >
                 Retry
-              </button>
+              </Button>
             </div>
           )}
           
@@ -221,52 +425,17 @@ export default function ScrapeStorePage() {
                 <p>Skipped {skippedProducts.length} products</p>
               )}
               
-              {savedProducts.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="text-md font-semibold mb-2">Saved Products</h4>
-                  <ul className="list-disc pl-5">
-                    {savedProducts.map((product, index) => (
-                      <li key={index}>
-                        {product.url ? (
-                          <a href={product.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                            {product.name || product.url}
-                          </a>
-                        ) : (
-                          <span>{product.name || 'Product'}</span>
-                        )}
-                      </li>
-                    )).slice(0, 10)}
-                    {savedProducts.length > 10 && (
-                      <li>...and {savedProducts.length - 10} more</li>
-                    )}
-                  </ul>
-                </div>
-              )}
-              
-              {skippedProducts.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="text-md font-semibold mb-2">Skipped Products</h4>
-                  <ul className="list-disc pl-5">
-                    {skippedProducts.map((product, index) => (
-                      <li key={index}>
-                        {product.url ? (
-                          <>
-                            <a href={product.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                              {product.url}
-                            </a>
-                            <span className="text-gray-500 ml-2">({product.reason})</span>
-                          </>
-                        ) : (
-                          <span>Product - {product.reason}</span>
-                        )}
-                      </li>
-                    )).slice(0, 10)}
-                    {skippedProducts.length > 10 && (
-                      <li>...and {skippedProducts.length - 10} more</li>
-                    )}
-                  </ul>
-                </div>
-              )}
+              <div className="flex gap-2 mt-4">
+                <Button 
+                  onClick={() => {
+                    setActiveScrapingStore(null);
+                    setJobId(null);
+                    setStatus(null);
+                  }}
+                >
+                  Close
+                </Button>
+              </div>
             </div>
           )}
         </div>

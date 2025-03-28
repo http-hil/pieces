@@ -17,66 +17,59 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-// Helper function to safely check if a URL exists in the database
+/**
+ * Check if a URL exists and is accessible
+ * @param url The URL to check
+ * @returns A promise that resolves to true if the URL exists, or false if it doesn't
+ */
 export async function checkUrlExists(url: string): Promise<boolean> {
   try {
-    console.log(`[DEBUG] checkUrlExists: Checking if URL exists in database: ${url}`);
-    
-    // Clean the URL by removing query parameters
-    let cleanUrl = url;
-    try {
-      // Parse the URL and remove query parameters
-      const urlObj = new URL(url);
-      urlObj.search = '';
-      cleanUrl = urlObj.toString();
-      
-      // Remove trailing slashes for consistency
-      cleanUrl = cleanUrl.replace(/\/+$/, '');
-      
-      console.log(`[DEBUG] checkUrlExists: Cleaned URL: ${cleanUrl}`);
-    } catch (err) {
-      console.error(`[DEBUG] checkUrlExists: Error cleaning URL: ${err}`);
-      // If URL parsing fails, use the original URL
+    // Ensure URL has a protocol
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
     }
     
-    // First try exact match
-    const { data: exactMatch, error: exactError } = await supabase
-      .from('items')
-      .select('id, url')
-      .eq('url', url)
-      .maybeSingle();
+    // Parse the URL to ensure it's valid
+    new URL(url);
     
-    if (exactError) {
-      console.error('[DEBUG] checkUrlExists: Error checking exact URL match:', exactError);
-    } else if (exactMatch) {
-      console.log(`[DEBUG] checkUrlExists: Found exact URL match: ${url}`);
+    // Try to fetch the URL with a HEAD request first (faster)
+    try {
+      const response = await fetch(url, { 
+        method: 'HEAD',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
+      
+      if (response.ok) {
+        return true; // URL exists and is accessible
+      }
+      
+      // If HEAD request fails, try a GET request as some servers don't support HEAD
+      const getResponse = await fetch(url, { 
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
+      
+      if (getResponse.ok) {
+        return true; // URL exists and is accessible
+      }
+      
+      return false; // URL is not accessible
+    } catch (fetchError) {
+      // If fetch fails (e.g., CORS issues), we'll still consider the URL valid
+      // as Firecrawl can often access URLs that fetch cannot due to CORS
+      console.warn(`Fetch check failed for ${url}, but proceeding anyway as Firecrawl may be able to access it:`, fetchError);
       return true;
     }
-    
-    // Then try with the cleaned URL (without query parameters)
-    // Use ilike for case-insensitive matching and handle URLs with and without query parameters
-    const { data, error } = await supabase
-      .from('items')
-      .select('id, url')
-      .or(`url.eq.${cleanUrl},url.ilike.${cleanUrl}%`)
-      .limit(1);
-    
-    if (error) {
-      console.error('[DEBUG] checkUrlExists: Error checking URL existence:', error);
-      console.error('[DEBUG] checkUrlExists: Error details:', JSON.stringify(error));
+  } catch (error) {
+    if (error instanceof TypeError && error.message.includes('Invalid URL')) {
+      console.error(`Invalid URL format: ${url}`);
       return false;
     }
-    
-    const exists = data && data.length > 0;
-    console.log(`[DEBUG] checkUrlExists: URL ${url} exists in database: ${exists}`);
-    
-    if (exists) {
-      console.log(`[DEBUG] checkUrlExists: Matching URL in database: ${data[0].url}`);
-    }
-    
-    return exists;
-  } catch (err) {
-    console.error('[DEBUG] checkUrlExists: Exception checking URL existence:', err);
+    console.error(`Error checking URL ${url}:`, error);
     return false;
   }
 }

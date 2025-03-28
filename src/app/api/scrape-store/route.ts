@@ -20,18 +20,18 @@ type ScrapeResponse = {
 };
 
 // Define types for our database items
-type StoreItem = {
+interface StoreItem {
   name: string;
-  product_img: string;
-  tags: string;
   url: string;
-  secondary_img?: string | null;
-  description?: string;
-  brand?: string;
-  category?: string;
+  price: string;
   color?: string;
-  price?: string | null;
-};
+  description?: string;
+  categories?: string[];
+  imageUrl?: string;
+  image_url?: string;
+  product_img?: string;
+  category?: string;
+}
 
 // Define types for our in-memory job store
 interface ProductScrapeJob {
@@ -296,9 +296,40 @@ function extractCategoryFromUrl(url: string): string {
   }
 }
 
-// Function to normalize URLs (remove www. prefix)
+// Function to normalize a URL
 function normalizeUrl(url: string): string {
-  return url.replace(/^https?:\/\/www\./, 'https://');
+  try {
+    // Ensure URL has a protocol
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+    
+    // Parse the URL
+    const parsedUrl = new URL(url);
+    
+    // Remove 'www.' if present
+    let hostname = parsedUrl.hostname;
+    if (hostname.startsWith('www.')) {
+      hostname = hostname.substring(4);
+      parsedUrl.hostname = hostname;
+    }
+    
+    // Remove trailing slash if present
+    let path = parsedUrl.pathname;
+    if (path.endsWith('/') && path.length > 1) {
+      path = path.slice(0, -1);
+      parsedUrl.pathname = path;
+    }
+    
+    // Ensure the URL is valid for Firecrawl
+    const normalizedUrl = parsedUrl.toString();
+    console.log(`Normalized URL: ${url} -> ${normalizedUrl}`);
+    
+    return normalizedUrl;
+  } catch (error) {
+    console.error(`Error normalizing URL ${url}:`, error);
+    return url; // Return original URL if normalization fails
+  }
 }
 
 // Function to scrape additional details from product page
@@ -307,6 +338,7 @@ async function scrapeProductDetails(productUrl: string): Promise<{
   description?: string;
   categories?: string[];
   price?: string;
+  imageUrl?: string;
 }> {
   console.log(`Scraping additional details from ${productUrl}`);
   
@@ -316,264 +348,459 @@ async function scrapeProductDetails(productUrl: string): Promise<{
       apiKey: process.env.FIRECRAWL_API_KEY || 'fc-b4be050554f34ee394b0e7258861e331'
     });
     
-    // Scrape the product page
+    // Scrape the product page with Firecrawl
+    console.log(`Using Firecrawl to scrape product page: ${productUrl}`);
+    
+    // Define extraction schema for structured data
+    const extractionSchema = {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        price: { type: 'string' },
+        description: { type: 'string' },
+        color: { type: 'string' },
+        categories: { 
+          type: 'array',
+          items: { type: 'string' }
+        },
+        imageUrl: { type: 'string' }
+      }
+    } as any; // Type assertion to avoid TypeScript error with Firecrawl schema
+    
+    // Scrape the product page with structured extraction
     const scrapedData = await app.scrapeUrl(productUrl, {
-      formats: ['html']
+      formats: ['html', 'extract'],
+      extract: {
+        schema: extractionSchema,
+        systemPrompt: `You are a product data extractor. Extract structured data from this product page. 
+        Look for the product name, price, description, color, categories (from breadcrumbs or tags), and main image URL.
+        For color, look for color names in the product title, variant selectors, or product details.
+        For categories, look for breadcrumb navigation or product tags.
+        For price, extract only the numeric value if possible.
+        For imageUrl, find the main product image URL.`
+      }
     }) as ScrapeResponse;
     
-    if (!scrapedData || !scrapedData.data || !scrapedData.data.html) {
-      console.error('Failed to get HTML content from product page');
+    if (!scrapedData || !scrapedData.data) {
+      console.error('Failed to get data from product page');
       return {};
     }
     
-    const html = scrapedData.data.html;
-    const $ = cheerio.load(html);
-    
-    // Check if this is an A Day's March product
-    if (productUrl.includes('adaysmarch.com')) {
-      let color = '';
-      let productDescription = '';
-      let price = '';
-      
-      // Extract color
-      const colorElement = $('.product-option-value');
-      if (colorElement.length > 0) {
-        color = colorElement.text().trim();
-      }
-      
-      // Extract description
-      const descriptionElement = $('.product-description');
-      if (descriptionElement.length > 0) {
-        productDescription = descriptionElement.text().trim();
-      }
-      
-      // Extract price
-      const priceElement = $('.product-price');
-      if (priceElement.length > 0) {
-        price = priceElement.text().trim().replace(/[^\d.]/g, '');
-      }
-      
-      // Extract categories
-      const categories: string[] = [];
-      const breadcrumbs = $('.breadcrumb-item');
-      breadcrumbs.each((index, element) => {
-        const category = $(element).text().trim().toLowerCase();
-        if (category && !category.includes('home') && !category.includes('a day\'s march')) {
-          categories.push(category);
-        }
-      });
+    // Check if we have extracted data
+    if (scrapedData.data.extract) {
+      console.log('Successfully extracted structured data from product page');
+      const extractedData = scrapedData.data.extract;
       
       return {
-        color,
-        description: productDescription,
-        categories,
-        price
+        color: extractedData.color,
+        description: extractedData.description,
+        categories: extractedData.categories,
+        price: extractedData.price,
+        imageUrl: extractedData.imageUrl
       };
     }
     
-    // Original Stussy logic
-    let color = '';
-    let description = '';
-    const categories: string[] = [];
-    
-    // Method 1: Look for color in product title or URL
-    if (productUrl.includes('/products/')) {
-      const urlParts = productUrl.split('/products/')[1].split('-');
-      // Usually the color is the last part after the last dash
-      const potentialColor = urlParts[urlParts.length - 1];
-      if (potentialColor && !potentialColor.match(/^\d+$/) && potentialColor !== 'ecru') {
-        color = potentialColor;
-      } else if (urlParts.length > 2) {
-        // Check if the second-to-last part is a color
-        const secondLastPart = urlParts[urlParts.length - 2];
-        if (secondLastPart && !secondLastPart.match(/^\d+$/)) {
-          color = secondLastPart;
-        }
-      }
-    }
-    
-    // Method 2: Look for color in product title
-    if (!color) {
-      const productTitle = $('.product-single__title, h1.product-title').text().trim();
-      // Extract color from product title if it contains a slash (common format: "Product Name Color/Ecru")
-      if (productTitle.includes('/')) {
-        const titleParts = productTitle.split('/');
-        // Get the part before the slash and extract the last word as color
-        const beforeSlash = titleParts[0].trim();
-        const beforeSlashWords = beforeSlash.split(' ');
-        color = beforeSlashWords[beforeSlashWords.length - 1].toLowerCase();
-      } else {
-        // Try to extract color using regex
-        const colorRegex = /\b(black|white|blue|red|green|yellow|orange|purple|pink|brown|grey|gray|navy|olive|tan|beige|sage|epsom)\b/i;
-        const match = productTitle.match(colorRegex);
-        if (match) {
-          color = match[0].toLowerCase();
-        }
-      }
-    }
-    
-    // Method 3: For About Blank, extract color from product title
-    if (!color && productUrl.includes('about---blank.com')) {
-      const productTitle = $('h1').text().trim();
-      if (productTitle.includes('/')) {
-        // Format is typically "product name color/ecru"
-        const parts = productTitle.split('/');
-        if (parts.length > 1) {
-          // Get the part before the slash and extract the last word as color
-          const beforeSlash = parts[0].trim();
-          const beforeSlashWords = beforeSlash.split(' ');
-          color = beforeSlashWords[beforeSlashWords.length - 1].toLowerCase();
-        }
-      }
-    }
-    
-    // Method 4: Look for color in variant selectors
-    if (!color) {
-      const colorElement = $('.product-related-colors__current, [data-product-option-name="Color"], .color-swatch--active');
-      if (colorElement.length) {
-        color = colorElement.text().trim().toLowerCase();
-      }
-    }
-    
-    // Extract description
-    const descriptionElement = $('#productInformationDescription');
-    if (descriptionElement.length) {
-      description = descriptionElement.text().trim();
-    } else {
-      // Try alternative selectors for description
-      const altDescriptionElement = $('.product__description, .product-description, .product-single__description');
-      if (altDescriptionElement.length) {
-        description = altDescriptionElement.text().trim();
-      }
-    }
-    
-    // Extract categories
-    const categoryElements = $('.product-meta__collections a, .product-categories a');
-    categoryElements.each((_, element) => {
-      categories.push($(element).text().trim());
-    });
-    
-    // Method 2: Extract from image attributes with hero:main:collection or hero:hover:collection
-    $('img').each((_, element) => {
-      const imgElement = $(element);
+    // If structured extraction failed, fallback to HTML parsing with Cheerio
+    if (scrapedData.data.html) {
+      console.log('Structured extraction failed, falling back to HTML parsing');
+      const html = scrapedData.data.html;
+      const $ = cheerio.load(html);
       
-      // Check for hero:main:collection attribute
-      const mainCollection = imgElement.attr('hero:main:collection');
-      if (mainCollection) {
-        const collectionCategories = mainCollection.split(',').map(cat => cat.trim());
-        categories.push(...collectionCategories.filter(cat => cat !== 'new-arrivals' && cat !== 'all'));
-      }
+      // Extract data using common selectors
+      const result: {
+        color?: string;
+        description?: string;
+        categories?: string[];
+        price?: string;
+        imageUrl?: string;
+      } = {};
       
-      // Check for hero:hover:collection attribute
-      const hoverCollection = imgElement.attr('hero:hover:collection');
-      if (hoverCollection) {
-        const collectionCategories = hoverCollection.split(',').map(cat => cat.trim());
-        categories.push(...collectionCategories.filter(cat => cat !== 'new-arrivals' && cat !== 'all'));
-      }
-    });
-    
-    // Method 3: For About Blank, extract category from breadcrumbs or URL path
-    if (categories.length === 0 && productUrl.includes('about---blank.com')) {
-      // Try to extract from URL - typically in /collections/category/products/...
-      const urlMatch = productUrl.match(/\/collections\/([^\/]+)/);
-      if (urlMatch && urlMatch[1] && urlMatch[1] !== 'shop-all') {
-        categories.push(urlMatch[1].replace(/-/g, ' '));
-      }
+      // Extract price
+      const priceSelectors = [
+        '.product-price', 
+        '.price', 
+        '.product-single__price',
+        '[data-product-price]',
+        '.money',
+        'meta[property="product:price:amount"]'
+      ];
       
-      // For About Blank, check the filter section on the page
-      if (categories.length === 0) {
-        // Look for category in the HTML by checking for the Category filter section
-        const htmlString = $.html();
-        if (htmlString.includes('Category')) {
-          // About Blank has categories in a filter section
-          const categoryMatch = htmlString.match(/Category<\/summary>[\s\S]*?<ul>([\s\S]*?)<\/ul>/);
-          if (categoryMatch && categoryMatch[1]) {
-            const categorySection = cheerio.load(categoryMatch[1]);
-            categorySection('li').each((_, element) => {
-              const categoryText = $(element).text().trim();
-              if (categoryText && !categoryText.includes('all')) {
-                categories.push(categoryText.toLowerCase());
-              }
-            });
+      for (const selector of priceSelectors) {
+        const element = $(selector);
+        if (element.length) {
+          const priceText = selector.includes('meta') 
+            ? element.attr('content') 
+            : element.text().trim();
+            
+          if (priceText) {
+            // Extract just the numeric part if possible
+            const priceMatch = priceText.match(/[\d,.]+/);
+            result.price = priceMatch ? priceMatch[0] : priceText;
+            break;
           }
         }
       }
       
-      // If still no categories, try to infer from product name
-      if (categories.length === 0) {
-        const productName = $('h1').text().trim().toLowerCase();
-        if (productName.includes('t-shirt') || productName.includes('tee')) {
-          categories.push('t-shirts');
-        } else if (productName.includes('hoodie')) {
-          categories.push('hoodies');
-        } else if (productName.includes('shirt') && !productName.includes('t-shirt')) {
-          categories.push('shirts');
-        } else if (productName.includes('pant') || productName.includes('trouser')) {
-          categories.push('trousers');
-        } else if (productName.includes('jacket') || productName.includes('coat')) {
-          categories.push('outerwear');
-        } else if (productName.includes('sweater') || productName.includes('knit')) {
-          categories.push('knitwear');
+      // Extract description
+      const descriptionSelectors = [
+        '.product-description',
+        '.product-single__description',
+        '.product-details__description',
+        '[data-product-description]',
+        'meta[property="og:description"]'
+      ];
+      
+      for (const selector of descriptionSelectors) {
+        const element = $(selector);
+        if (element.length) {
+          const descText = selector.includes('meta') 
+            ? element.attr('content') 
+            : element.text().trim();
+            
+          if (descText) {
+            result.description = descText;
+            break;
+          }
         }
       }
-    }
-    
-    // Extract price
-    let price = '';
-    const priceElement = $('.product__price, .product-price, .price, .product-single__price');
-    if (priceElement.length) {
-      price = priceElement.text().trim();
-    }
-    
-    // For About Blank, extract price from specific elements
-    if (!price && productUrl.includes('about---blank.com')) {
-      const priceElement = $('[data-price]');
-      if (priceElement.length) {
-        price = priceElement.attr('data-price') || priceElement.text().trim();
+      
+      // Extract color
+      const colorSelectors = [
+        '.product-option-value',
+        '.swatch-selected',
+        '.color-swatch.active',
+        '[data-selected-color]',
+        '[aria-label*="Color"]'
+      ];
+      
+      for (const selector of colorSelectors) {
+        const element = $(selector);
+        if (element.length) {
+          const colorText = element.attr('data-selected-color') || element.text().trim();
+          if (colorText) {
+            result.color = colorText;
+            break;
+          }
+        }
       }
+      
+      // If no color found in selectors, try to extract from URL or title
+      if (!result.color) {
+        // Try to extract from URL
+        if (productUrl.includes('/products/')) {
+          const urlParts = productUrl.split('/products/')[1].split('-');
+          // Usually the color is the last part after the last dash
+          const potentialColor = urlParts[urlParts.length - 1];
+          if (potentialColor && !potentialColor.match(/^\d+$/) && potentialColor !== 'ecru') {
+            result.color = potentialColor;
+          }
+        }
+        
+        // If still no color, try to extract from title
+        if (!result.color) {
+          const title = $('h1').text().trim();
+          if (title.includes('/')) {
+            const titleParts = title.split('/');
+            result.color = titleParts[titleParts.length - 1].trim();
+          }
+        }
+      }
+      
+      // Extract categories
+      const categories: string[] = [];
+      
+      // Try breadcrumbs first
+      $('.breadcrumb a, .breadcrumbs a, nav[aria-label="breadcrumb"] a').each((_, element) => {
+        const $element = $(element);
+        const category = $element.text().trim().toLowerCase();
+        
+        // Check if this is the category filter
+        if (category && 
+            !category.includes('home') && 
+            !category.includes('index') &&
+            !category.match(/^\d+$/)) {
+          categories.push(category);
+        }
+      });
+      
+      // Try product tags
+      $('.product-tags a, .tags a').each((_, element) => {
+        const $element = $(element);
+        const tag = $element.text().trim().toLowerCase();
+        if (tag) {
+          categories.push(tag);
+        }
+      });
+      
+      if (categories.length > 0) {
+        result.categories = categories;
+      }
+      
+      // Extract image URL
+      const imageSelectors = [
+        '.product-featured-img',
+        '.product-single__photo img',
+        '.product-image img',
+        '[data-zoom-image]',
+        'meta[property="og:image"]'
+      ];
+      
+      for (const selector of imageSelectors) {
+        const element = $(selector);
+        if (element.length) {
+          const imgSrc = selector.includes('meta') 
+            ? element.attr('content') 
+            : (element.attr('data-zoom-image') || element.attr('src'));
+            
+          if (imgSrc) {
+            result.imageUrl = imgSrc.startsWith('//') ? `https:${imgSrc}` : imgSrc;
+            break;
+          }
+        }
+      }
+      
+      return result;
     }
     
-    // Remove duplicates from categories
-    const uniqueCategories = [...new Set(categories)];
-    
-    console.log(`Extracted details - Color: ${color || 'Not found'}, Description: ${description ? 'Found' : 'Not found'}, Categories: ${uniqueCategories.join(', ') || 'None'}, Price: ${price || 'Not found'}`);
-    
-    return {
-      color: color || undefined,
-      description: description || undefined,
-      categories: uniqueCategories.length > 0 ? uniqueCategories : undefined,
-      price: price || undefined
-    };
+    return {};
   } catch (error) {
-    console.error(`Error scraping product details from ${productUrl}:`, error);
+    console.error(`Error scraping product details: ${error}`);
     return {};
   }
 }
 
-// Function to scrape a store page for products
-async function scrapeStorePage(storeUrl: string, maxProducts: number = 50): Promise<{
-  productCards: any[];
+// Function to map product card data to database schema
+function mapCardToDbSchema(
+  card: any, 
+  storeUrl: string, 
+  additionalDetails?: { 
+    color?: string; 
+    description?: string;
+    categories?: string[];
+    price?: string;
+    imageUrl?: string;
+  },
+  storeCategories: string[] = []
+): StoreItem {
+  // Extract brand from URL
+  const brand = extractBrandFromUrl(storeUrl);
+  
+  // Combine categories from store and product
+  const allCategories = [
+    ...(storeCategories || []),
+    ...(additionalDetails?.categories || [])
+  ];
+  
+  // Get unique categories
+  const uniqueCategories = [...new Set(allCategories)];
+  
+  // Get the first category as the primary category
+  const category = uniqueCategories.length > 0 ? uniqueCategories[0] : '';
+  
+  // Combine color information
+  const finalColor = additionalDetails?.color || card.color || '';
+  
+  // Combine price information
+  let finalPriceString = additionalDetails?.price || card.price || '';
+  
+  // If price is a number, format it as a string
+  if (typeof finalPriceString === 'number') {
+    finalPriceString = finalPriceString.toString();
+  }
+  
+  // Clean the price string
+  const finalPrice = cleanPrice(finalPriceString);
+  
+  return {
+    name: card.name,
+    url: card.url,
+    price: finalPrice,
+    color: finalColor || 'unknown',
+    description: additionalDetails?.description || `${card.name} - ${finalColor || 'unknown color'} - ${finalPriceString || 'unknown'}`,
+    categories: uniqueCategories,
+    category,
+    imageUrl: card.imageUrl || '',
+    image_url: card.imageUrl || '',
+    product_img: card.imageUrl || ''
+  };
+}
+
+// Function to clean price string
+function cleanPrice(priceString: string): string {
+  try {
+    // Make a copy of the price string
+    let finalPriceString = priceString;
+    
+    // Save the original price for reference
+    const originalPrice = finalPriceString;
+    
+    // Remove currency symbols, commas, spaces, and other non-numeric characters
+    // Keep only digits and decimal point
+    finalPriceString = finalPriceString.replace(/[^\d.,]/g, '');
+    
+    // Replace comma with dot for decimal separator if needed
+    finalPriceString = finalPriceString.replace(',', '.');
+    
+    // If the price is empty after cleaning, return the original
+    if (!finalPriceString) {
+      return originalPrice;
+    }
+    
+    // Parse the price as a float
+    const price = parseFloat(finalPriceString);
+    
+    // If the price is NaN, return the original
+    if (isNaN(price)) {
+      return originalPrice;
+    }
+    
+    // Return the price as a string with 2 decimal places
+    return price.toFixed(2);
+  } catch (error) {
+    console.error(`Error cleaning price: ${error}`);
+    return priceString || ''; // Return original or empty string if null/undefined
+  }
+}
+
+// Function to save product to database
+async function saveProductToDatabase(product: StoreItem, storeUrl: string, categories: string[] = []): Promise<{ success: boolean; message: string; productId?: string }> {
+  try {
+    console.log(`Saving product to database: ${product.name}`);
+    
+    // Check if product already exists
+    const { data: existingProducts, error: existingError } = await supabase
+      .from('products')
+      .select('id, url')
+      .eq('url', product.url);
+    
+    if (existingError) {
+      console.error('Error checking for existing product:', existingError);
+      return { success: false, message: `Database error: ${existingError.message}` };
+    }
+    
+    // Prepare the product data
+    const productData = {
+      name: product.name,
+      url: product.url,
+      price: parseFloat(product.price) || null,
+      color: product.color || null,
+      description: product.description || null,
+      store_url: storeUrl,
+      categories: categories, // Ensure categories is an array
+      image_url: product.imageUrl || product.image_url || product.product_img || null
+    };
+    
+    // If product exists, update it
+    if (existingProducts && existingProducts.length > 0) {
+      const existingId = existingProducts[0].id;
+      
+      const { error: updateError } = await supabase
+        .from('products')
+        .update(productData)
+        .eq('id', existingId);
+      
+      if (updateError) {
+        console.error('Error updating product:', updateError);
+        return { success: false, message: `Database error: ${updateError.message}` };
+      }
+      
+      console.log(`Updated existing product: ${product.name}`);
+      return { success: true, message: 'Product updated successfully', productId: existingId };
+    }
+    
+    // Otherwise, insert new product
+    const { data: insertedProduct, error: insertError } = await supabase
+      .from('products')
+      .insert([productData])
+      .select();
+    
+    if (insertError) {
+      console.error('Error inserting product:', insertError);
+      return { success: false, message: `Database error: ${insertError.message}` };
+    }
+    
+    if (!insertedProduct || insertedProduct.length === 0) {
+      return { success: false, message: 'Product was not inserted for unknown reason' };
+    }
+    
+    console.log(`Inserted new product: ${product.name}`);
+    return { 
+      success: true, 
+      message: 'Product added successfully', 
+      productId: insertedProduct[0].id 
+    };
+  } catch (error) {
+    console.error('Error saving product to database:', error);
+    return { success: false, message: `Unexpected error: ${error}` };
+  }
+}
+
+// Function to scrape a store page
+async function scrapeStorePage(storeUrl: string, maxProducts: number = 50): Promise<{ 
+  productCards: any[]; 
   categories?: string[];
 }> {
   console.log(`Scraping store page: ${storeUrl}`);
   
   try {
+    // Detect platform and use appropriate scraper
+    const platform = detectPlatform(storeUrl);
+    console.log(`Detected platform: ${platform}`);
+    
+    switch (platform) {
+      case 'shopify':
+        if (storeUrl.includes('stussy.com')) {
+          return await scrapeStussyStore(storeUrl, maxProducts);
+        }
+        // TODO: Add general Shopify scraper here
+        break;
+      case 'carhartt-wip':
+        return await scrapeCarharttWipStore(storeUrl, maxProducts);
+      default:
+        // Continue with generic scraper
+        break;
+    }
+    
     // Normalize the URL to ensure it works without 'www.'
     const normalizedUrl = normalizeUrl(storeUrl);
     
-    // Fetch the store page
-    console.log(`Fetching store page HTML...`);
-    const response = await fetch(normalizedUrl);
+    // Initialize Firecrawl app with API key from environment variable
+    const app = new FirecrawlApp({ 
+      apiKey: process.env.FIRECRAWL_API_KEY || 'fc-b4be050554f34ee394b0e7258861e331'
+    });
     
-    if (!response.ok) {
-      console.error(`Failed to fetch store page: ${response.statusText}`);
-      return { productCards: [] };
+    console.log(`Using Firecrawl to scrape store page: ${normalizedUrl}`);
+    
+    // Scrape the store page using Firecrawl
+    const scrapedData = await app.scrapeUrl(normalizedUrl, {
+      formats: ['html', 'links', 'markdown']
+    }) as ScrapeResponse;
+    
+    // Log the entire response for debugging
+    console.log(`Firecrawl response status: ${scrapedData.success ? 'success' : 'failure'}`);
+    if (scrapedData.error) {
+      console.error(`Firecrawl error: ${scrapedData.error}`);
+      throw new Error(`Failed to start scraping: ${scrapedData.error}`);
     }
     
-    const html = await response.text();
-    console.log(`Received HTML of length: ${html.length}`);
+    if (!scrapedData || !scrapedData.data) {
+      console.error('Failed to get data from store page');
+      throw new Error('Failed to get data from store page');
+    }
     
-    // Parse the HTML
+    const html = scrapedData.data.html;
+    const links = scrapedData.data.links || [];
+    const markdown = scrapedData.data.markdown || '';
+    
+    if (!html) {
+      console.error('Failed to get HTML content from store page');
+      throw new Error('Failed to get HTML content from store page');
+    }
+    
+    console.log(`Received HTML of length: ${html.length}`);
+    console.log(`Received ${links.length} links from store page`);
+    
+    // Parse the HTML with Cheerio to extract product information
     const $ = cheerio.load(html);
     
     // Extract categories from the page
@@ -581,14 +808,14 @@ async function scrapeStorePage(storeUrl: string, maxProducts: number = 50): Prom
     
     // Method 1: Look for category filters
     console.log(`Looking for category filters...`);
-    $('.filter-group').each((_, filterGroup) => {
+    $('.filter-group, .facets__display, .collection-filters').each((_, filterGroup) => {
       const $filterGroup = $(filterGroup);
-      const filterTitle = $filterGroup.find('.filter-group__header').text().trim().toLowerCase();
+      const filterTitle = $filterGroup.find('.filter-group__header, .facets__heading, h3').text().trim().toLowerCase();
       
       // Check if this is the category filter
-      if (filterTitle.includes('category')) {
+      if (filterTitle.includes('category') || filterTitle.includes('product type')) {
         console.log(`Found category filter: ${filterTitle}`);
-        $filterGroup.find('input[type="checkbox"], .filter-group__option, li').each((_, option) => {
+        $filterGroup.find('input[type="checkbox"], .filter-group__option, li, .facets__list, .facets__item').each((_, option) => {
           const optionText = $(option).next('label').text().trim() || $(option).text().trim();
           if (optionText && !optionText.toLowerCase().includes('all')) {
             console.log(`Found category: ${optionText}`);
@@ -600,7 +827,7 @@ async function scrapeStorePage(storeUrl: string, maxProducts: number = 50): Prom
     
     // Method 2: Look for category links in the navigation
     console.log(`Looking for category links in navigation...`);
-    $('nav a, .collection-filters a').each((_, link) => {
+    $('nav a, .collection-filters a, .facets__list a').each((_, link) => {
       const $link = $(link);
       const href = $link.attr('href') || '';
       const linkText = $link.text().trim();
@@ -615,235 +842,285 @@ async function scrapeStorePage(storeUrl: string, maxProducts: number = 50): Prom
       }
     });
     
-    // Method 4: For About Blank, extract categories from the filter section
-    if (storeUrl.includes('about---blank.com')) {
-      console.log(`Checking About Blank specific category filters...`);
-      // About Blank has a specific structure for categories
-      $('details').each((_, element) => {
-        const details = $(element);
-        const summary = details.find('summary').text().trim();
-        
-        if (summary.toLowerCase() === 'category') {
-          console.log(`Found About Blank category filter section`);
-          details.find('li').each((_, li) => {
-            const categoryText = $(li).text().trim();
-            if (categoryText && 
-                !categoryText.toLowerCase().includes('all') && 
-                !categoryText.toLowerCase().includes('hide')) {
-              console.log(`Found About Blank category: ${categoryText}`);
-              categories.push(categoryText.toLowerCase());
-            }
-          });
-        }
-      });
-    }
-    
-    // Find all product cards
+    // Process product links to extract product cards
     const productCards: any[] = [];
+    const processedUrls = new Set<string>();
     
-    // Look for product cards - Stussy style
-    console.log(`Looking for Stussy-style product cards...`);
-    $('.product-card').each((index, element) => {
-      if (productCards.length >= maxProducts) return false;
+    // Special handling for Stussy website
+    if (storeUrl.includes('stussy.com')) {
+      console.log('Detected Stussy website, using specialized extraction');
       
-      const card = $(element);
-      const linkElement = card.find('a').first();
-      const url = linkElement.attr('href');
-      const fullUrl = url ? (url.startsWith('http') ? url : `${new URL(storeUrl).origin}${url}`) : '';
+      // Filter links to find product URLs
+      const stussyProductLinks = links.filter(link => {
+        // Keep only product links and exclude collection links
+        return (link.includes('/products/') && 
+                !link.includes('/collections/all-products/products/')) || 
+               link.includes('/products?variant=');
+      });
       
-      const nameElement = card.find('.product-card__title');
-      const name = nameElement.text().trim();
+      console.log(`Found ${stussyProductLinks.length} Stussy product links`);
       
-      const priceElement = card.find('.product-card__price');
-      const price = priceElement.text().trim();
-      
-      const imageElement = card.find('.product-card__image img');
-      const imageUrl = imageElement.attr('src') || '';
-      
-      // Extract color from image alt text
-      const imageAlt = imageElement.attr('alt') || '';
-      const color = imageAlt.split(' ')[0] || ''; // First word in alt text is often the color
-      
-      if (url && name) {
-        console.log(`Found Stussy product: ${name} (${fullUrl})`);
-        productCards.push({
-          url: fullUrl,
-          name,
-          price,
-          imageUrl,
-          color
-        });
-      }
-    });
-    
-    // About Blank specific product card structure
-    if (productCards.length === 0 && storeUrl.includes('about---blank.com')) {
-      console.log(`Looking for About Blank product cards...`);
-      
-      // First, let's log the entire HTML to see what we're working with
-      console.log(`First 1000 characters of HTML: ${html.substring(0, 1000)}`);
-      
-      // Try to find all product links for About Blank
-      console.log(`Searching for all product links on About Blank...`);
-      const productLinks = $('a[href*="/products/"]');
-      console.log(`Found ${productLinks.length} potential product links`);
-      
-      // Log some sample links
-      if (productLinks.length > 0) {
-        productLinks.slice(0, 5).each((index, element) => {
-          const href = $(element).attr('href');
-          const text = $(element).text().trim();
-          console.log(`Product link ${index}: href=${href}, text=${text}`);
-        });
-      }
-      
-      // Try to find product cards with different selectors
-      const selectors = [
-        '.product-grid-item', 
-        '.product-item', 
-        '.product-card',
-        '.grid__item',
-        '.grid-product',
-        'li.grid__item',
-        'div[data-product-id]',
-        '.collection-products a',
-        '.product-grid a'
-      ];
-      
-      for (const selector of selectors) {
-        const elements = $(selector);
-        console.log(`Selector '${selector}' found ${elements.length} elements`);
+      // Process each product link
+      for (const link of stussyProductLinks) {
+        if (productCards.length >= maxProducts) break;
         
-        if (elements.length > 0) {
-          console.log(`Found elements with selector '${selector}', processing...`);
+        try {
+          // Normalize the URL
+          const fullUrl = link.startsWith('http') ? link : `${new URL(storeUrl).origin}${link}`;
           
-          elements.each((index, element) => {
-            if (productCards.length >= maxProducts) return false;
-            
-            const card = $(element);
-            let linkElement = card.is('a') ? card : card.find('a').first();
-            let url = linkElement.attr('href');
-            
-            // If no URL found, try to find it in parent elements
-            if (!url) {
-              const parentWithLink = card.parents('a').first();
-              if (parentWithLink.length) {
-                url = parentWithLink.attr('href');
-                linkElement = parentWithLink;
-              }
-            }
-            
-            // Skip if not a product URL
-            if (!url || !url.includes('/products/')) {
-              return;
-            }
-            
-            const fullUrl = url.startsWith('http') ? url : `${new URL(storeUrl).origin}${url}`;
-            
-            // Try different selectors for product name
-            let name = '';
-            const nameSelectors = ['.product-title', '.product-item-title', '.product-name', '.title', 'h3', 'h2'];
-            for (const nameSelector of nameSelectors) {
-              const nameElement = card.find(nameSelector).first();
-              if (nameElement.length && nameElement.text().trim()) {
-                name = nameElement.text().trim();
-                break;
-              }
-            }
-            
-            // If no name found, try to get it from the URL
-            if (!name) {
-              const urlParts = url.split('/');
-              const productSlug = urlParts[urlParts.length - 1].split('?')[0];
-              name = productSlug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            }
-            
-            // Try different selectors for price
-            let price = '';
-            const priceSelectors = ['.price', '.product-price', '.product-item-price', '.money'];
-            for (const priceSelector of priceSelectors) {
-              const priceElement = card.find(priceSelector).first();
-              if (priceElement.length && priceElement.text().trim()) {
-                price = priceElement.text().trim();
-                break;
-              }
-            }
-            
-            // Try different selectors for image
-            let imageUrl = '';
-            const imgElement = card.find('img').first();
-            if (imgElement.length) {
-              imageUrl = imgElement.attr('src') || imgElement.attr('data-src') || '';
-              
-              // Shopify sometimes uses relative URLs for images
-              if (imageUrl && !imageUrl.startsWith('http')) {
-                imageUrl = imageUrl.startsWith('//') ? `https:${imageUrl}` : `${new URL(storeUrl).origin}${imageUrl}`;
-              }
-            }
-            
-            // Extract color from URL or name
-            let color = '';
-            if (url) {
-              const urlParts = url.split('/');
-              const productSlug = urlParts[urlParts.length - 1].split('?')[0];
-              if (productSlug.includes('-')) {
-                const slugParts = productSlug.split('-');
-                // Usually the color is the last part
-                const potentialColor = slugParts[slugParts.length - 1];
-                if (potentialColor && !potentialColor.match(/^\d+$/)) {
-                  color = potentialColor;
-                }
-              }
-            }
-            
-            console.log(`About Blank product details: url=${fullUrl}, name=${name}, price=${price}, imageUrl=${imageUrl}`);
-            
-            if (url) {
-              console.log(`Found About Blank product: ${name || 'Unnamed'} (${fullUrl})`);
-              productCards.push({
-                url: fullUrl,
-                name: name || 'Unknown Product',
-                price,
-                imageUrl,
-                color
-              });
-            } else {
-              console.log(`Skipped About Blank product due to missing url`);
-            }
+          // Skip if we've already processed this URL or if it's not a product URL
+          if (processedUrls.has(fullUrl) || !fullUrl.includes('/products/')) continue;
+          processedUrls.add(fullUrl);
+          
+          // Extract product information from the URL
+          const urlObj = new URL(fullUrl);
+          const pathParts = urlObj.pathname.split('/');
+          const productSlug = pathParts[pathParts.length - 1].split('?')[0];
+          
+          // Generate a product name from the slug
+          // Stussy product URLs often have a format like: 116618-big-ol-jean-washed-canvas-brown
+          // The first part is the product ID, the rest is the product name
+          const slugParts = productSlug.split('-');
+          const productId = slugParts[0];
+          const nameWithoutId = slugParts.slice(1).join(' ');
+          
+          let name = nameWithoutId || productSlug.replace(/-/g, ' ');
+          name = name.replace(/\b\w/g, l => l.toUpperCase()); // Capitalize first letter of each word
+          
+          // Extract color from URL if possible
+          let color = '';
+          if (slugParts.length > 2) {
+            // Usually the color is in the last parts
+            const potentialColors = slugParts.slice(-2);
+            color = potentialColors.join(' ');
+          }
+          
+          console.log(`Found Stussy product: ${name} (${fullUrl})`);
+          
+          productCards.push({
+            url: fullUrl,
+            name,
+            price: '', // We'll get this from product details later
+            imageUrl: '', // We'll get this from product details later
+            color
           });
+        } catch (cardError) {
+          console.error('Error extracting A Day\'s March product card data:', cardError);
         }
       }
       
-      // If still no products found, try a more generic approach with all links
-      if (productCards.length === 0) {
-        console.log(`No About Blank products found with specific selectors, trying all links...`);
+      // If we still don't have enough products, try to extract more from the HTML
+      if (productCards.length < maxProducts) {
+        console.log('Trying to extract more Stussy products from HTML...');
         
-        $('a').each((index, element) => {
+        // Look for product links in the HTML
+        $('a[href*="/products/"]').each((_, element) => {
           if (productCards.length >= maxProducts) return false;
           
-          const $link = $(element);
-          const href = $link.attr('href') || '';
+          const link = $(element).attr('href');
+          if (!link) return;
           
-          // Check if this looks like a product link
-          if (href.includes('/products/')) {
-            const fullUrl = href.startsWith('http') ? href : `${new URL(storeUrl).origin}${href}`;
-            const name = $link.text().trim() || $link.find('img').attr('alt') || href.split('/').pop() || '';
-            const imageUrl = $link.find('img').attr('src') || '';
+          const fullUrl = link.startsWith('http') ? link : `${new URL(storeUrl).origin}${link}`;
+          
+          // Skip if we've already processed this URL or if it's a collection URL
+          if (processedUrls.has(fullUrl) || 
+              fullUrl.includes('/collections/all-products/products/') || 
+              !fullUrl.includes('/products/')) {
+            return;
+          }
+          
+          processedUrls.add(fullUrl);
+          
+          try {
+            // Extract product information from the URL
+            const urlObj = new URL(fullUrl);
+            const pathParts = urlObj.pathname.split('/');
+            const productSlug = pathParts[pathParts.length - 1].split('?')[0];
             
-            console.log(`Found generic product link: ${name || 'Unnamed'} (${fullUrl})`);
+            // Generate a product name from the slug
+            const slugParts = productSlug.split('-');
+            const productId = slugParts[0];
+            const nameWithoutId = slugParts.slice(1).join(' ');
             
-            // Only add if we don't already have this URL
-            if (!productCards.some(card => card.url === fullUrl)) {
+            let name = nameWithoutId || productSlug.replace(/-/g, ' ');
+            name = name.replace(/\b\w/g, l => l.toUpperCase());
+            
+            // Extract color from URL if possible
+            let color = '';
+            if (slugParts.length > 2) {
+              const potentialColors = slugParts.slice(-2);
+              color = potentialColors.join(' ');
+            }
+            
+            console.log(`Found additional Stussy product from HTML: ${name} (${fullUrl})`);
+            
+            productCards.push({
+              url: fullUrl,
+              name,
+              price: '', // We'll get this from product details later
+              imageUrl: '', // We'll get this from product details later
+              color
+            });
+          } catch (error) {
+            console.error(`Error processing additional Stussy product link ${link}:`, error);
+          }
+        });
+      }
+    } else {
+      // Standard processing for non-Stussy websites
+      // Find product links from the scraped links
+      const productLinks = links.filter(link => 
+        link.includes('/products/') || 
+        link.includes('/product/') ||
+        link.includes('?variant=')
+      );
+      
+      console.log(`Found ${productLinks.length} potential product links`);
+      
+      // Process up to maxProducts unique product links
+      for (const link of productLinks) {
+        if (productCards.length >= maxProducts) break;
+        
+        // Normalize the URL and check if we've already processed it
+        const fullUrl = link.startsWith('http') ? link : `${new URL(storeUrl).origin}${link}`;
+        
+        // Skip if we've already processed this URL
+        if (processedUrls.has(fullUrl)) continue;
+        processedUrls.add(fullUrl);
+        
+        try {
+          // Extract product information from the URL
+          const urlObj = new URL(fullUrl);
+          const pathParts = urlObj.pathname.split('/');
+          const productSlug = pathParts[pathParts.length - 1].split('?')[0];
+          
+          // Generate a product name from the slug
+          let name = productSlug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+          
+          // Extract color from URL if possible
+          let color = '';
+          if (productSlug.includes('-')) {
+            const slugParts = productSlug.split('-');
+            // Usually the color is the last part
+            const potentialColor = slugParts[slugParts.length - 1];
+            
+            if (potentialColor && !potentialColor.match(/^\d+$/)) {
+              color = potentialColor;
+            }
+          }
+          
+          console.log(`Found product: ${name} (${fullUrl})`);
+          
+          productCards.push({
+            url: fullUrl,
+            name,
+            price: '', // We'll get this from product details later
+            imageUrl: '', // We'll get this from product details later
+            color
+          });
+        } catch (error) {
+          console.error(`Error processing product link ${link}:`, error);
+        }
+      }
+      
+      // If no product links found in the links array, try to extract them from the HTML
+      if (productCards.length === 0) {
+        console.log(`No product links found in links array, trying to extract from HTML...`);
+        
+        // Try different selectors for product cards
+        const selectors = [
+          '.product-card',
+          '.product-grid-item', 
+          '.product-item', 
+          '.grid__item',
+          '.grid-product',
+          'li.grid__item',
+          'div[data-product-id]',
+          '.collection-products a',
+          '.product-grid a',
+          'a[href*="/products/"]'
+        ];
+        
+        for (const selector of selectors) {
+          const elements = $(selector);
+          console.log(`Selector '${selector}' found ${elements.length} elements`);
+          
+          if (elements.length > 0) {
+            // Process each element that might be a product card
+            elements.each((index, element) => {
+              if (productCards.length >= maxProducts) return false;
+              
+              const card = $(element);
+              
+              // Find the link element - either the card itself if it's an <a> or the first <a> inside
+              const linkElement = card.is('a') ? card : card.find('a').first();
+              const url = linkElement.attr('href');
+              
+              // Skip if no URL found or if it doesn't look like a product URL
+              if (!url || !(url.includes('/product') || url.includes('?variant='))) {
+                return;
+              }
+              
+              // Normalize the URL
+              const fullUrl = url.startsWith('http') ? url : `${new URL(storeUrl).origin}${url}`;
+              
+              // Skip if we've already processed this URL
+              if (processedUrls.has(fullUrl)) {
+                return;
+              }
+              processedUrls.add(fullUrl);
+              
+              // Try different selectors for product name
+              let name = '';
+              const nameSelectors = ['.product-title', '.product-item-title', '.product-name', '.title', 'h3', 'h2', '.product-item__title'];
+              for (const nameSelector of nameSelectors) {
+                const nameElement = card.find(nameSelector).first();
+                if (nameElement.length && nameElement.text().trim()) {
+                  name = nameElement.text().trim();
+                  break;
+                }
+              }
+              
+              // If no name found, try to get it from the URL
+              if (!name && url) {
+                const urlParts = url.split('/');
+                const productSlug = urlParts[urlParts.length - 1];
+                name = productSlug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              }
+              
+              // Ensure we have a name
+              if (!name) {
+                name = 'Unknown Product';
+              }
+              
+              // Try different selectors for image
+              let imageUrl = '';
+              const imgElement = card.find('img').first();
+              if (imgElement.length) {
+                imageUrl = imgElement.attr('src') || imgElement.attr('data-src') || '';
+                
+                // Shopify sometimes uses relative URLs for images
+                if (imageUrl && !imageUrl.startsWith('http')) {
+                  imageUrl = imageUrl.startsWith('//') ? `https:${imageUrl}` : `${new URL(storeUrl).origin}${imageUrl}`;
+                }
+              }
+              
+              console.log(`Found product from HTML: ${name} (${fullUrl})`);
+              
               productCards.push({
                 url: fullUrl,
-                name: name || 'Unknown Product',
-                price: '',
+                name,
+                price: '', // We'll get this from product details later
                 imageUrl,
                 color: ''
               });
+            });
+            
+            if (productCards.length > 0) {
+              break; // Stop if we found products with this selector
             }
           }
-        });
+        }
       }
     }
     
@@ -855,697 +1132,535 @@ async function scrapeStorePage(storeUrl: string, maxProducts: number = 50): Prom
     console.log(`Found ${productCards.length} products on the page`);
     console.log(`Found categories: ${uniqueCategories.join(', ') || 'None'}`);
     
+    if (productCards.length === 0) {
+      throw new Error('No products found on the store page');
+    }
+    
     return { productCards, categories: uniqueCategories };
   } catch (error) {
     console.error(`Error scraping store page: ${error}`);
-    return { productCards: [] };
+    throw error; // Propagate the error to be handled by the caller
   }
 }
 
-// Function to map product card data to database schema
-function mapCardToDbSchema(card: {
-  url: string;
-  name: string;
-  price: string;
-  imageUrl: string;
-  color: string;
-}, storeUrl: string, additionalDetails?: { 
-  color?: string; 
-  description?: string;
+// Function to scrape Stussy store specifically
+async function scrapeStussyStore(storeUrl: string, maxProducts: number = 50): Promise<{ 
+  productCards: any[]; 
   categories?: string[];
-  price?: string;
-}, storeCategories?: string[]): StoreItem {
-  // Extract brand from URL
-  const brand = extractBrandFromUrl(storeUrl);
+}> {
+  console.log(`Using specialized Stussy scraper with Shopify JSON API for: ${storeUrl}`);
   
-  // Collect all possible categories
-  const allCategories: string[] = [];
-  
-  // 1. Add categories from URL (lowest priority)
-  const urlCategory = extractCategoryFromUrl(storeUrl);
-  if (urlCategory && urlCategory !== 'unknown') {
-    allCategories.push(urlCategory);
-  }
-  
-  // 2. Add categories from store page (medium priority)
-  if (storeCategories && storeCategories.length > 0) {
-    allCategories.push(...storeCategories);
-  }
-  
-  // 3. Add categories from product details (highest priority)
-  if (additionalDetails?.categories && additionalDetails.categories.length > 0) {
-    allCategories.push(...additionalDetails.categories);
-  }
-  
-  // 4. For About Blank, try to extract category from product name if no categories found
-  if (allCategories.length === 0 && storeUrl.includes('about---blank.com')) {
-    const productName = card.name.toLowerCase();
-    if (productName.includes('t-shirt') || productName.includes('tee')) {
-      allCategories.push('t-shirts');
-    } else if (productName.includes('hoodie')) {
-      allCategories.push('hoodies');
-    } else if (productName.includes('shirt') && !productName.includes('t-shirt')) {
-      allCategories.push('shirts');
-    } else if (productName.includes('pant') || productName.includes('trouser')) {
-      allCategories.push('trousers');
-    } else if (productName.includes('jacket') || productName.includes('coat')) {
-      allCategories.push('outerwear');
-    } else if (productName.includes('sweater') || productName.includes('knit')) {
-      allCategories.push('knitwear');
-    }
-  }
-  
-  // Filter out 'new', 'new-arrivals', and 'all' if we have other categories
-  let finalCategories = allCategories
-    .map(cat => cat.trim().toLowerCase())
-    .filter(cat => cat.length > 0);
-  
-  // If we have categories other than 'new', 'new-arrivals', or 'all', filter those out
-  const hasOtherCategories = finalCategories.some(cat => 
-    cat !== 'new' && 
-    cat !== 'new-arrivals' && 
-    cat !== 'all' && 
-    cat !== 'general' &&
-    cat !== 'shop-all'
-  );
-  
-  if (hasOtherCategories) {
-    finalCategories = finalCategories.filter(cat => 
-      cat !== 'new' && 
-      cat !== 'new-arrivals' && 
-      cat !== 'all' && 
-      cat !== 'general' &&
-      cat !== 'shop-all'
-    );
-  }
-  
-  // Remove duplicates and join with comma
-  const uniqueCategories = [...new Set(finalCategories)];
-  const category = uniqueCategories.join(', ');
-  
-  // Use the color from additional details if available, otherwise use the one from the card
-  let finalColor = additionalDetails?.color || card.color;
-  
-  // For About Blank, extract color from product name if not already found
-  if ((!finalColor || finalColor === '') && storeUrl.includes('about---blank.com')) {
-    const productName = card.name;
-    if (productName.includes('/')) {
-      // Format is typically "product name color/ecru"
-      const parts = productName.split('/');
-      if (parts.length > 1) {
-        // Get the part before the slash and extract the last word as color
-        const beforeSlash = parts[0].trim();
-        const beforeSlashWords = beforeSlash.split(' ');
-        finalColor = beforeSlashWords[beforeSlashWords.length - 1].toLowerCase();
-      }
-    } else {
-      // Try to extract using regex
-      const colorRegex = /\b(black|white|blue|red|green|yellow|orange|purple|pink|brown|grey|gray|navy|olive|tan|beige|sage|epsom)\b/i;
-      const match = productName.match(colorRegex);
-      if (match) {
-        finalColor = match[0].toLowerCase();
-      }
-    }
-  }
-  
-  // Use the price from additional details if available, otherwise use the one from the card
-  let finalPriceString = additionalDetails?.price || card.price;
-  
-  // Clean and convert the price string to a numeric value
-  // Remove currency symbols, commas, spaces, and other non-numeric characters
-  // Keep only digits and decimal point
-  let finalPrice: string | null = null;
-  
-  if (finalPriceString) {
-    // First, store the original price string for the tags
-    const originalPrice = finalPriceString;
-    
-    // Remove currency symbols, commas, spaces, and other non-numeric characters
-    // Keep only digits and decimal point/comma
-    finalPriceString = finalPriceString.replace(/[^\d.,]/g, '');
-    
-    // Replace comma with dot for decimal separator if needed
-    finalPriceString = finalPriceString.replace(/,/g, '.');
-    
-    // If there are multiple dots, keep only the last one (assuming it's the decimal separator)
-    const dotCount = (finalPriceString.match(/\./g) || []).length;
-    if (dotCount > 1) {
-      const parts = finalPriceString.split('.');
-      const lastPart = parts.pop() || '';
-      finalPriceString = parts.join('') + '.' + lastPart;
-    }
-    
-    // Check if we have a valid number
-    if (!isNaN(parseFloat(finalPriceString))) {
-      finalPrice = finalPriceString;
-      console.log(`Converted price from "${originalPrice}" to "${finalPrice}"`);
-    } else {
-      console.warn(`Could not convert price "${originalPrice}" to a number, using null instead`);
-    }
-  }
-  
-  return {
-    name: card.name,
-    product_img: card.imageUrl,
-    tags: `${finalColor || 'unknown color'}, price:${finalPriceString || 'unknown'}, ${category || 'unknown category'}, ${brand}`,
-    url: card.url,
-    secondary_img: null,
-    description: additionalDetails?.description || `${card.name} - ${finalColor || 'unknown color'} - ${finalPriceString || 'unknown'}`,
-    brand,
-    category,
-    color: finalColor || 'unknown',
-    price: finalPrice
-  };
-}
-
-// Function to save product to database
-async function saveProductToDatabase(product: StoreItem) {
   try {
-    console.log(`Checking if product exists: ${product.url}`);
-    // Check if the product URL already exists
-    const exists = await checkUrlExists(product.url);
-    console.log(`Product URL exists check result: ${exists}`);
+    // Normalize the Stussy URL to ensure we're using the correct domain
+    const normalizedUrl = storeUrl.includes('stussy.com') 
+      ? storeUrl 
+      : 'https://www.stussy.com/collections/new-arrivals';
     
-    if (exists) {
-      console.log(`Product with URL ${product.url} already exists, skipping...`);
-      return { success: false, message: 'Product already exists' };
+    console.log(`Using normalized Stussy URL: ${normalizedUrl}`);
+    
+    // Parse the URL to get the collection handle
+    const urlObj = new URL(normalizedUrl);
+    const pathParts = urlObj.pathname.split('/');
+    let collectionHandle = 'new-arrivals'; // Default collection
+    
+    // Find the collection handle in the URL path
+    for (let i = 0; i < pathParts.length; i++) {
+      if (pathParts[i] === 'collections' && i + 1 < pathParts.length) {
+        collectionHandle = pathParts[i + 1];
+        break;
+      }
     }
     
-    console.log('Saving product to database:', product.name);
-    console.log('Product data:', JSON.stringify(product));
+    console.log(`Using collection handle: ${collectionHandle}`);
     
-    // Log the table schema to debug
-    console.log('Attempting to get table info...');
-    let actualColumns: string[] = [];
-    try {
-      const { data: tableInfo, error: tableError } = await supabase
-        .from('items')
-        .select('*')
-        .limit(1);
+    // Construct the Shopify JSON API URL
+    // Format: /collections/{collection-handle}/products.json
+    const shopifyApiUrl = `https://www.stussy.com/collections/${collectionHandle}/products.json`;
+    
+    console.log(`Fetching products from Shopify API: ${shopifyApiUrl}`);
+    
+    // Fetch products from Shopify API
+    const response = await fetch(shopifyApiUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+      }
+    });
+    
+    if (!response.ok) {
+      console.error(`Error fetching from Shopify API: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch from Shopify API: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.products || !Array.isArray(data.products)) {
+      console.error('Invalid response from Shopify API: No products array');
+      throw new Error('Invalid response from Shopify API: No products array');
+    }
+    
+    console.log(`Found ${data.products.length} products from Shopify API`);
+    
+    // Transform Shopify products to our product card format
+    const productCards = data.products.slice(0, maxProducts).map((product: any) => {
+      // Get the main image URL
+      const imageUrl = product.images && product.images.length > 0 
+        ? product.images[0].src 
+        : '';
       
-      if (tableError) {
-        console.error('Error getting table info:', tableError);
-      } else {
-        console.log('Table first row:', tableInfo);
-        if (tableInfo && tableInfo.length > 0) {
-          actualColumns = Object.keys(tableInfo[0]);
-          console.log('Table columns:', actualColumns);
+      // Get the price from the first variant
+      let price = '';
+      if (product.variants && product.variants.length > 0) {
+        price = product.variants[0].price ? `$${product.variants[0].price}` : '';
+      }
+      
+      // Extract color from tags or options
+      let color = '';
+      
+      // Check if there's a color option
+      if (product.options) {
+        const colorOption = product.options.find((option: any) => 
+          option.name.toLowerCase() === 'color' || 
+          option.name.toLowerCase() === 'colour'
+        );
+        
+        if (colorOption && colorOption.values && colorOption.values.length > 0) {
+          color = colorOption.values[0];
         }
       }
-    } catch (tableErr) {
-      console.error('Exception getting table info:', tableErr);
+      
+      // If no color found in options, try to extract from product handle
+      if (!color && product.handle) {
+        const handleParts = product.handle.split('-');
+        if (handleParts.length > 1) {
+          // The last part is often the color
+          color = handleParts[handleParts.length - 1];
+        }
+      }
+      
+      return {
+        url: `https://www.stussy.com/products/${product.handle}`,
+        name: product.title,
+        price,
+        imageUrl,
+        color
+      };
+    });
+    
+    // Extract categories from product tags
+    const categories = new Set<string>();
+    
+    data.products.forEach((product: any) => {
+      if (product.tags && Array.isArray(product.tags)) {
+        product.tags.forEach((tag: string) => {
+          // Filter out non-category tags (usually categories are single words or short phrases)
+          if (tag && tag.length > 0 && tag.length < 30 && !tag.includes(':')) {
+            categories.add(tag.toLowerCase());
+          }
+        });
+      }
+      
+      // Also check product type
+      if (product.product_type) {
+        categories.add(product.product_type.toLowerCase());
+      }
+    });
+    
+    const uniqueCategories = Array.from(categories);
+    
+    console.log(`Found ${productCards.length} products for Stussy store`);
+    console.log(`Found categories: ${uniqueCategories.join(', ') || 'None'}`);
+    
+    if (productCards.length === 0) {
+      throw new Error('No products found for the Stussy store');
     }
     
-    // Adapt the product data to match the actual database schema
-    const adaptedProduct: Record<string, any> = {};
+    return { productCards, categories: uniqueCategories };
+  } catch (error) {
+    console.error(`Error scraping Stussy store page: ${error}`);
+    throw error;
+  }
+}
+
+// Function to scrape Carhartt-WIP store specifically
+async function scrapeCarharttWipStore(storeUrl: string, maxProducts: number = 50): Promise<{ 
+  productCards: any[]; 
+  categories?: string[];
+}> {
+  console.log(`Using specialized Carhartt-WIP scraper with Firecrawl extract for: ${storeUrl}`);
+  
+  try {
+    // Normalize the Carhartt-WIP URL to ensure we're using the correct domain and path
+    const normalizedUrl = storeUrl.includes('carhartt-wip.com') 
+      ? storeUrl 
+      : 'https://www.carhartt-wip.com/en/men';
     
-    // Map our fields to the database fields, handling different naming conventions
-    const fieldMappings: Record<string, string[]> = {
-      'name': ['name', 'Name'],
-      'product_img': ['product_img', 'Main image URL', 'image_url', 'imageUrl'],
-      'tags': ['tags', 'Tags'],
-      'url': ['url', 'URL', 'product_url'],
-      'secondary_img': ['secondary_img', 'Secundary image', 'secondaryImg'],
-      'description': ['description', 'Description'],
-      'brand': ['brand', 'Brand'],
-      'category': ['category', 'Category'],
-      'color': ['color', 'Color'],
-      'price': ['price', 'Price']
+    console.log(`Using normalized Carhartt-WIP URL: ${normalizedUrl}`);
+    
+    // Initialize Firecrawl app with API key from environment variable
+    const app = new FirecrawlApp({ 
+      apiKey: process.env.FIRECRAWL_API_KEY || 'fc-b4be050554f34ee394b0e7258861e331'
+    });
+    
+    // Define extraction schema and response type
+    type CarharttProductData = {
+      name: string;
+      url: string;
+      price: string;
+      imageUrl: string;
+      color: string;
+      categories: string[];
     };
     
-    // For each of our fields, try to find a matching column in the database
-    for (const [ourField, possibleDbFields] of Object.entries(fieldMappings)) {
-      // Skip if the product doesn't have this field
-      if (!(ourField in product)) {
-        console.log(`Product doesn't have field: ${ourField}`);
-        continue;
-      }
-      
-      // Find the first matching column in the database
-      const matchingColumn = possibleDbFields.find(dbField => actualColumns.includes(dbField));
-      
-      if (matchingColumn) {
-        // Special handling for price field - ensure it's a number or null
-        if (ourField === 'price') {
-          const priceValue = (product as any)[ourField];
-          console.log(`Processing price field: ${priceValue}, type: ${typeof priceValue}`);
+    type CarharttCategoryLink = {
+      name: string;
+      url: string;
+    };
+    
+    type CarharttExtractResponse = {
+      products: CarharttProductData[];
+      categoryLinks: CarharttCategoryLink[];
+    };
+    
+    // Use Firecrawl extract to get product data
+    console.log(`Using Firecrawl extract to scrape Carhartt-WIP store: ${normalizedUrl}`);
+    
+    const extractResponse = await app.extract(
+      [normalizedUrl],
+      {
+        prompt: `Extract all men's product information from the Carhartt-WIP website. For each product, extract:
+          1. Product name
+          2. Product URL
+          3. Price
+          4. Image URL
+          5. Color (if available)
+          6. Categories
           
-          if (priceValue === null || priceValue === undefined) {
-            adaptedProduct[matchingColumn] = null;
-            console.log(`Price is null or undefined, setting to null`);
-          } else {
-            // Try to convert to a number if it's a string
-            try {
-              // Clean the price string - remove currency symbols, commas, etc.
-              const cleanedPrice = typeof priceValue === 'string' 
-                ? priceValue.replace(/[^\d.,]/g, '').replace(/,/g, '.') 
-                : priceValue;
-              
-              console.log(`Cleaned price: ${cleanedPrice}`);
-              
-              const numericPrice = typeof cleanedPrice === 'string' 
-                ? parseFloat(cleanedPrice) 
-                : cleanedPrice;
-              
-              console.log(`Numeric price: ${numericPrice}, isNaN: ${isNaN(numericPrice)}`);
-              
-              adaptedProduct[matchingColumn] = isNaN(numericPrice) ? null : numericPrice;
-              console.log(`Final price value for database: ${adaptedProduct[matchingColumn]}`);
-            } catch (error) {
-              console.error(`Error converting price "${priceValue}" to number:`, error);
-              adaptedProduct[matchingColumn] = null;
+          Also extract all category links from the men's section.`,
+        schema: {
+          type: "object", 
+          properties: {
+            products: {
+              type: "array", 
+              items: {
+                type: "object", 
+                properties: {
+                  name: {type: "string"}, 
+                  url: {type: "string"}, 
+                  price: {type: "string"}, 
+                  imageUrl: {type: "string"}, 
+                  color: {type: "string"}, 
+                  categories: {
+                    type: "array", 
+                    items: {type: "string"}
+                  }
+                }
+              }
+            }, 
+            categoryLinks: {
+              type: "array", 
+              items: {
+                type: "object", 
+                properties: {
+                  name: {type: "string"}, 
+                  url: {type: "string"}
+                }
+              }
             }
           }
-        } else {
-          // Use the matching column name from the database
-          adaptedProduct[matchingColumn] = (product as any)[ourField];
-          console.log(`Mapped field ${ourField} to column ${matchingColumn}: ${adaptedProduct[matchingColumn]}`);
-        }
-      } else {
-        console.warn(`Could not find matching column for field ${ourField}`);
+        },
+        allowExternalLinks: true
       }
+    );
+    
+    // Type guard to check if we have a successful response with data
+    const isExtractResponse = (response: any): response is CarharttExtractResponse => {
+      return response && 
+        typeof response === 'object' && 
+        Array.isArray(response.products);
+    };
+    
+    if (!isExtractResponse(extractResponse)) {
+      console.error('Failed to extract data from Carhartt-WIP store');
+      throw new Error('Failed to extract data from Carhartt-WIP store');
     }
     
-    console.log('Adapted product data:', JSON.stringify(adaptedProduct));
+    const extractedData = extractResponse as CarharttExtractResponse;
     
-    // Insert the adapted product into the database
-    console.log('Inserting product...');
-    const { data, error } = await supabase
-      .from('items')
-      .insert([adaptedProduct]);
+    console.log(`Successfully extracted data from Carhartt-WIP store`);
+    console.log(`Found ${extractedData.products.length} products and ${extractedData.categoryLinks?.length || 0} categories`);
     
-    if (error) {
-      console.error('Error saving product to database:', error);
-      console.error('Error details:', JSON.stringify(error));
-      return { success: false, message: error.message || 'Database error', error };
+    // Transform extracted products to our product card format
+    const productCards = extractedData.products.slice(0, maxProducts).map((product) => {
+      return {
+        url: product.url,
+        name: product.name,
+        price: product.price || '',
+        imageUrl: product.imageUrl || '',
+        color: product.color || ''
+      };
+    });
+    
+    // Extract categories from category links
+    const categories: string[] = extractedData.categoryLinks 
+      ? extractedData.categoryLinks.map((cat) => cat.name.toLowerCase())
+      : [];
+    
+    // Remove duplicates from categories
+    const uniqueCategories = [...new Set(categories)];
+    
+    console.log(`Processed ${productCards.length} products for Carhartt-WIP store`);
+    console.log(`Found categories: ${uniqueCategories.join(', ') || 'None'}`);
+    
+    if (productCards.length === 0) {
+      throw new Error('No products found for the Carhartt-WIP store');
     }
     
-    console.log('Product saved successfully:', product.name);
-    console.log('Database response:', data);
-    return { success: true, data };
-  } catch (err: any) {
-    console.error('Exception saving product to database:', err);
-    console.error('Exception details:', err?.message || 'No error message');
-    return { success: false, message: err?.message || 'Exception during database operation', error: err };
+    return { productCards, categories: uniqueCategories };
+  } catch (error) {
+    console.error(`Error scraping Carhartt-WIP store page: ${error}`);
+    throw error;
   }
 }
 
-// Debug function to check existing products from a domain
-async function checkExistingProductsFromDomain(domain: string) {
-  try {
-    console.log(`Checking existing products from domain: ${domain}`);
-    
-    const { data, error } = await supabase
-      .from('items')
-      .select('id, url, name')
-      .ilike('url', `%${domain}%`)
-      .limit(10);
-    
-    if (error) {
-      console.error(`Error checking existing products from ${domain}:`, error);
-      return;
-    }
-    
-    console.log(`Found ${data?.length || 0} existing products from ${domain}:`);
-    if (data && data.length > 0) {
-      data.forEach(item => {
-        console.log(`- ${item.name} (${item.url})`);
-      });
-    }
-  } catch (err) {
-    console.error(`Exception checking existing products from ${domain}:`, err);
+// Function to detect e-commerce platform from URL
+function detectPlatform(url: string): 'shopify' | 'carhartt-wip' | 'generic' {
+  const urlLower = url.toLowerCase();
+  
+  if (urlLower.includes('carhartt-wip.com')) {
+    return 'carhartt-wip';
+  } else if (
+    urlLower.includes('myshopify.com') || 
+    urlLower.includes('shopify.com') ||
+    urlLower.includes('stussy.com')
+  ) {
+    return 'shopify';
   }
+  
+  return 'generic';
 }
 
 export async function POST(request: NextRequest) {
   try {
     const { storeUrl, maxProducts = 50, scrapeAutoJobId } = await request.json();
-
+    
     if (!storeUrl) {
-      return NextResponse.json(
-        { message: 'Store URL is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, message: 'Store URL is required' }, { status: 400 });
     }
+    
+    console.log(`Received request to scrape store: ${storeUrl}`);
+    console.log(`Max products to scrape: ${maxProducts}`);
+    
+    // Check if the URL exists and is accessible
+    const urlExists = await checkUrlExists(storeUrl);
+    if (!urlExists) {
+      return NextResponse.json({ success: false, message: 'Store URL is not accessible' }, { status: 400 });
+    }
+    
+    // Check if we have any existing products from this domain
+    const domain = new URL(storeUrl).hostname;
+    console.log(`Checking for existing products from domain: ${domain}`);
+    
+    // Comment out the call to checkExistingProductsFromDomain as it's no longer needed
+    // await checkExistingProductsFromDomain(domain);
+    
+    // Scrape the store page
+    console.log(`Scraping store page: ${storeUrl}`);
+    try {
+      const { productCards, categories: storeCategories = [] } = await scrapeStorePage(storeUrl, maxProducts);
+      
+      if (productCards.length === 0) {
+        return NextResponse.json({ 
+          success: false, 
+          message: 'No products found on the store page',
+          storeUrl,
+          productsScraped: 0
+        }, { status: 404 });
+      }
+      
+      console.log(`Found ${productCards.length} products on the store page`);
+      
+      // Process each product
+      const products: any[] = [];
+      const skippedProducts: any[] = [];
 
-    console.log(`Starting scrape of store: ${storeUrl} with target of ${maxProducts} new products${scrapeAutoJobId ? ` (part of scrape-auto job ${scrapeAutoJobId})` : ''}`);
-    
-    // Debug check for existing products if this is about---blank.com
-    if (storeUrl.includes('about---blank.com')) {
-      await checkExistingProductsFromDomain('about---blank.com');
-    }
-    
-    // Create a unique job ID for this scrape
-    const jobId = crypto.randomUUID();
-    
-    // Try to scrape the store page directly first
-    const { productCards, categories } = await scrapeStorePage(storeUrl, Math.max(maxProducts, 50)); // Fetch at least 50 products initially
-    
-    if (productCards.length > 0) {
-      console.log(`Successfully scraped ${productCards.length} products from the store page`);
-      
-      // Store the product cards in memory
-      global.productScrapeJobs = global.productScrapeJobs || {};
-      global.productScrapeJobs[jobId] = {
-        status: 'processing',
-        storeUrl,
-        productCards,
-        progress: 0,
-        savedProducts: [],
-        skippedProducts: [] as { url: string; name?: string; reason: string }[],
-        scrapeAutoJobId // Store the scrape-auto job ID if provided
-      };
-      
-      // Initialize job status in the new system
-      await updateJobStatus(jobId, {
-        status: 'processing',
-        progress: 0,
-        message: `Starting to process products. Target: ${maxProducts} new products to save`,
-        savedCount: 0,
-        skippedCount: 0,
-        totalProcessed: 0
-      });
-      
-      // Start processing the products in the background
-      processProductCards(jobId, storeUrl, maxProducts, categories).catch(err => {
-        console.error('Error processing product cards:', err);
-        if (global.productScrapeJobs && global.productScrapeJobs[jobId]) {
-          global.productScrapeJobs[jobId].status = 'error';
-          global.productScrapeJobs[jobId].error = err.message;
-        }
+      let savedCount = 0;
+      let totalProcessed = 0;
+
+      // Process each product card
+      for (const card of productCards) {
+        if (savedCount >= maxProducts) break;
         
-        // Update job status to failed in the new system
-        updateJobStatus(jobId, {
-          status: 'error',
-          progress: 0,
-          message: `Error processing products: ${err.message}`,
-          savedCount: 0,
-          skippedCount: 0,
-          totalProcessed: 0
-        }).catch(console.error);
-      });
-      
-      // Return the job ID so the client can check the status later
+        totalProcessed++;
+
+        try {
+          // Check if product already exists
+          const exists = await checkUrlExists(card.url);
+          if (exists) {
+            skippedProducts.push({ url: card.url, reason: 'Already exists in database' });
+            continue;
+          }
+
+          // Scrape additional details from product page
+          console.log(`[DEBUG] Processing product: ${card.url}`);
+          const additionalDetails = await scrapeProductDetails(card.url);
+
+          // Map card data to database schema
+          const product = mapCardToDbSchema(card, storeUrl, additionalDetails, storeCategories || []);
+
+          // Save product to database
+          const result = await saveProductToDatabase(product, storeUrl, storeCategories || []);
+          if (!result.success) {
+            skippedProducts.push({ url: card.url, reason: result.message });
+            continue;
+          }
+
+          // Add to saved products list
+          products.push({ 
+            id: result.productId,
+            name: product.name, 
+            url: product.url,
+            price: product.price,
+            color: product.color,
+            imageUrl: product.imageUrl || product.image_url
+          });
+          savedCount++;
+
+          // Update job progress
+          const progress = Math.min(100, Math.round((savedCount / maxProducts) * 100));
+          try {
+            await updateJobStatus(scrapeAutoJobId, {
+              status: 'processing',
+              progress,
+              message: `Saved ${savedCount} of ${maxProducts} products...`,
+              savedCount,
+              skippedCount: skippedProducts.length,
+              totalProcessed,
+            });
+          } catch (error) {
+            console.error(`Error updating job progress: ${error}`);
+          }
+
+        } catch (error: any) {
+          console.error(`Error processing product ${card.url}:`, error);
+          skippedProducts.push({ url: card.url, reason: error.message || 'Error processing product' });
+        }
+      }
+
+      // Return the result
       return NextResponse.json({ 
-        message: `Store scrape started. Target: ${maxProducts} new products to save`,
-        jobId,
-        status: 'processing',
+        success: true, 
+        message: 'Products scraped and saved successfully',
         storeUrl,
-        totalProducts: productCards.length,
-        targetNewProducts: maxProducts
+        productsScraped: products.length,
+        products,
+        skippedProducts
       });
+    } catch (error: any) {
+      console.error('Error in scrapeStorePage:', error);
+      
+      // Format the error message
+      let errorMessage = 'Failed to scrape store page';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      // Check if it's a specific error we want to handle
+      if (errorMessage.includes('No products found')) {
+        return NextResponse.json({ 
+          success: false, 
+          message: 'No products found on the store page',
+          storeUrl,
+          productsScraped: 0
+        }, { status: 404 });
+      } else if (errorMessage.includes('404')) {
+        return NextResponse.json({ 
+          success: false, 
+          message: 'Store page returned 404 Not Found',
+          storeUrl,
+          productsScraped: 0
+        }, { status: 404 });
+      }
+      
+      // Return a generic error response
+      return NextResponse.json({ 
+        success: false, 
+        message: errorMessage,
+        storeUrl,
+        productsScraped: 0,
+        error: error instanceof Error ? error.stack : String(error)
+      }, { status: 500 });
     }
+  } catch (error) {
+    console.error('Error in scrape-store API:', error);
+    return NextResponse.json({ 
+      success: false, 
+      message: 'Internal server error', 
+      error: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
+  }
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const url = new URL(request.url);
+    const jobId = url.searchParams.get('jobId');
+    const storeUrl = url.searchParams.get('storeUrl');
     
-    // If direct scraping failed, try the Shopify JSON approach
-    console.log('Direct scraping failed, trying Shopify JSON approach...');
-    
-    // For Shopify stores, we can use the products.json endpoint
-    // Extract the collection path from the URL
-    const url = new URL(storeUrl);
-    const pathParts = url.pathname.split('/');
-    const collectionIndex = pathParts.findIndex(part => part === 'collections');
-    
-    if (collectionIndex === -1 || collectionIndex + 1 >= pathParts.length) {
+    if (!jobId) {
       return NextResponse.json(
-        { message: 'Invalid collection URL format and direct scraping failed' },
+        { message: 'Job ID is required' },
         { status: 400 }
       );
     }
     
-    const collectionHandle = pathParts[collectionIndex + 1];
-    const shopifyJsonUrl = `${url.origin}/collections/${collectionHandle}/products.json?limit=${maxProducts}`;
+    // First check if the job exists in the new job status system
+    const jobStatus = getJobStatus(jobId);
     
-    console.log(`Fetching Shopify products JSON from: ${shopifyJsonUrl}`);
-    
-    // Fetch the products JSON
-    const response = await fetch(shopifyJsonUrl);
-    
-    if (!response.ok) {
-      return NextResponse.json(
-        { message: `Failed to fetch products JSON and direct scraping failed: ${response.statusText}` },
-        { status: response.status }
-      );
+    if (jobStatus) {
+      // Return the job status from the new system
+      return NextResponse.json({
+        status: jobStatus.status,
+        progress: jobStatus.progress,
+        message: jobStatus.message,
+        savedCount: jobStatus.savedCount || 0,
+        skippedCount: jobStatus.skippedCount || 0,
+        totalProcessed: jobStatus.totalProcessed || 0
+      });
     }
     
-    const productsData = await response.json();
-    const products = productsData.products || [];
-    
-    console.log(`Found ${products.length} products in JSON response`);
-    
-    if (products.length === 0) {
+    // Fallback to the old system if not found in the new one
+    if (!global.productScrapeJobs || !global.productScrapeJobs[jobId]) {
       return NextResponse.json(
-        { message: 'No products found in the collection and direct scraping failed' },
+        { message: 'Job not found' },
         { status: 404 }
       );
     }
     
-    // Map Shopify products to our format
-    const shopifyProductCards = products.map((product: any) => {
-      const variant = product.variants[0] || {};
-      const image = product.images[0] || {};
-      
-      return {
-        url: `${url.origin}/products/${product.handle}`,
-        name: product.title,
-        price: variant.price ? `$${variant.price}` : 'N/A',
-        imageUrl: image.src || '',
-        color: product.tags.length > 0 ? product.tags[0] : 'Unknown'
-      };
+    const job = global.productScrapeJobs[jobId];
+    
+    // Return the job status and progress
+    return NextResponse.json({
+      status: job.status,
+      progress: job.progress,
+      savedProducts: job.savedProducts,
+      skippedProducts: job.skippedProducts,
+      error: job.error,
+      totalProcessed: job.savedProducts.length + job.skippedProducts.length,
+      savedCount: job.savedProducts.length,
+      skippedCount: job.skippedProducts.length,
+      targetProducts: job.savedProducts.length >= 1 ? job.savedProducts.length : 0,
+      storeUrl: job.storeUrl
     });
-    
-    // Store the product cards in memory
-    global.productScrapeJobs = global.productScrapeJobs || {};
-    global.productScrapeJobs[jobId] = {
-      status: 'processing',
-      storeUrl,
-      productCards: shopifyProductCards,
-      progress: 0,
-      savedProducts: [],
-      skippedProducts: [] as { url: string; name?: string; reason: string }[],
-      scrapeAutoJobId // Store the scrape-auto job ID if provided
-    };
-    
-    // Initialize job status in the new system
-    await updateJobStatus(jobId, {
-      status: 'processing',
-      progress: 0,
-      message: `Starting to process products. Target: ${maxProducts} new products to save`,
-      savedCount: 0,
-      skippedCount: 0,
-      totalProcessed: 0
-    });
-    
-    // Start processing the products in the background
-    processProductCards(jobId, storeUrl, maxProducts, categories).catch(err => {
-      console.error('Error processing product cards:', err);
-      if (global.productScrapeJobs && global.productScrapeJobs[jobId]) {
-        global.productScrapeJobs[jobId].status = 'error';
-        global.productScrapeJobs[jobId].error = err.message;
-      }
-      
-      // Update job status to failed in the new system
-      updateJobStatus(jobId, {
-        status: 'error',
-        progress: 0,
-        message: `Error processing products: ${err.message}`,
-        savedCount: 0,
-        skippedCount: 0,
-        totalProcessed: 0
-      }).catch(console.error);
-    });
-    
-    // Return the job ID so the client can check the status later
-    return NextResponse.json({ 
-      message: `Store scrape started using Shopify JSON. Target: ${maxProducts} new products to save`,
-      jobId,
-      status: 'processing',
-      storeUrl,
-      totalProducts: shopifyProductCards.length,
-      targetNewProducts: maxProducts
-    });
-    
   } catch (error) {
-    console.error('Error in scrape-store API:', error);
+    console.error('Error in scrape-store status API:', error);
     return NextResponse.json(
       { message: 'Internal server error', error },
       { status: 500 }
     );
-  }
-}
-
-// Function to process product cards in the background
-async function processProductCards(jobId: string, storeUrl: string, maxProducts: number = 10, storeCategories?: string[]) {
-  try {
-    // Get the job from memory
-    const job = global.productScrapeJobs[jobId];
-    if (!job) {
-      throw new Error(`Job ${jobId} not found`);
-    }
-    
-    const { productCards } = job;
-    const savedProducts: Array<{ url: string; name: string }> = [];
-    const skippedProducts: Array<{ url: string; name?: string; reason: string }> = [];
-    
-    // Track the scrape-auto job ID if it exists
-    const scrapeAutoJobId = job.scrapeAutoJobId;
-    
-    console.log(`Processing ${productCards.length} product cards for job ${jobId}`);
-    console.log(`Target: ${maxProducts} new products to save`);
-    
-    // Process each product card
-    let index = 0;
-    let savedCount = 0;
-    let needMoreProducts = false;
-    
-    while (index < productCards.length) {
-      // If we've saved enough products, stop processing
-      if (savedCount >= maxProducts) {
-        break;
-      }
-      
-      const card = productCards[index];
-      index++;
-      
-      try {
-        // Calculate progress as a percentage of products processed
-        const progress = Math.min(100, Math.round((savedCount / maxProducts) * 100));
-        
-        // Update job status
-        job.progress = progress;
-        
-        // Update job status in the new system
-        await updateJobStatus(jobId, {
-          status: 'processing',
-          progress,
-          message: `Processing product ${index} of ${productCards.length}. Saved ${savedCount} of ${maxProducts} target products.`,
-          savedCount,
-          skippedCount: skippedProducts.length,
-          totalProcessed: savedCount + skippedProducts.length
-        });
-        
-        // Check if the product already exists in the database
-        const exists = await checkUrlExists(card.url);
-        
-        if (exists) {
-          console.log(`Product ${card.url} already exists in database, skipping`);
-          skippedProducts.push({
-            url: card.url,
-            name: card.name,
-            reason: 'Product already exists in database'
-          });
-          job.skippedProducts = skippedProducts;
-          continue;
-        }
-        
-        // Scrape additional details from the product page
-        console.log(`Scraping additional details for ${card.url}`);
-        const additionalDetails = await scrapeProductDetails(card.url);
-        
-        // Map the product card to the database schema
-        const product = mapCardToDbSchema(card, storeUrl, additionalDetails, storeCategories);
-        
-        // Save the product to the database
-        console.log(`Saving product ${product.name} to database`);
-        await saveProductToDatabase(product);
-        
-        // Add to saved products list
-        savedProducts.push({
-          url: card.url,
-          name: product.name
-        });
-        
-        // Update saved count
-        savedCount++;
-        
-        // Update job status
-        job.savedProducts = savedProducts;
-        
-        console.log(`Saved ${savedCount} of ${maxProducts} target products`);
-      } catch (err: any) {
-        console.error(`Error processing product card ${card.url}:`, err);
-        
-        // Add to skipped products list
-        skippedProducts.push({
-          url: card.url,
-          name: card.name,
-          reason: err.message || 'Unknown error'
-        });
-        
-        // Update job status
-        job.skippedProducts = skippedProducts;
-      }
-      
-      // If we're at the end of the product cards but haven't saved enough products,
-      // we need to fetch more products from the next page
-      if (index >= productCards.length && savedCount < maxProducts) {
-        needMoreProducts = true;
-      }
-    }
-    
-    // If we need more products, try to fetch them from the next page
-    if (needMoreProducts) {
-      try {
-        console.log(`Need more products. Saved ${savedCount} of ${maxProducts} target products.`);
-        
-        // Update job status
-        await updateJobStatus(jobId, {
-          status: 'processing',
-          progress: Math.min(100, Math.round((savedCount / maxProducts) * 100)),
-          message: `Fetching more products. Saved ${savedCount} of ${maxProducts} target products so far.`,
-          savedCount,
-          skippedCount: skippedProducts.length,
-          totalProcessed: savedCount + skippedProducts.length
-        });
-        
-        // TODO: Implement pagination to fetch more products
-        // This would involve detecting the next page URL and scraping it
-      } catch (err) {
-        console.error('Error fetching more products:', err);
-      }
-    }
-    
-    // Update job status to completed
-    job.status = 'completed';
-    job.progress = 100;
-    
-    // Update job status in the new system
-    await updateJobStatus(jobId, {
-      status: 'completed',
-      progress: 100,
-      message: `Completed processing. Saved ${savedCount} products, skipped ${skippedProducts.length} products.`,
-      savedCount,
-      skippedCount: skippedProducts.length,
-      totalProcessed: savedCount + skippedProducts.length
-    });
-    
-    console.log(`Completed processing job ${jobId}. Saved ${savedCount} products, skipped ${skippedProducts.length} products.`);
-    
-    // If this is part of a scrape-auto job, report back to the scrape-auto job
-    if (scrapeAutoJobId) {
-      // TODO: Implement reporting back to the scrape-auto job
-    }
-  } catch (err: any) {
-    console.error(`Error processing product cards for job ${jobId}:`, err);
-    
-    // Get the job from memory
-    const job = global.productScrapeJobs[jobId];
-    if (job) {
-      // Update job status to error
-      job.status = 'error';
-      job.error = err.message || 'Unknown error';
-      
-      // Update job status in the new system
-      await updateJobStatus(jobId, {
-        status: 'error',
-        progress: 0,
-        message: `Error processing products: ${err.message || 'Unknown error'}`,
-        savedCount: job.savedProducts?.length || 0,
-        skippedCount: job.skippedProducts?.length || 0,
-        totalProcessed: (job.savedProducts?.length || 0) + (job.skippedProducts?.length || 0)
-      });
-    }
-    
-    throw err;
   }
 }
 
@@ -1743,13 +1858,9 @@ async function scrapeProductPage(productUrl: string): Promise<any> {
       
       if (productSlug.includes('-')) {
         const slugParts = productSlug.split('-');
-        // Usually the color is the last part
-        const potentialColor = slugParts[slugParts.length - 1];
-        
-        if (potentialColor && !potentialColor.match(/^\d+$/)) {
-          console.log(`Found potential color in URL: ${potentialColor}`);
-          color = potentialColor.toLowerCase();
-        }
+        // Usually the color is in the last parts
+        const potentialColors = slugParts.slice(-2);
+        color = potentialColors.join(' ');
       }
     }
     
@@ -1799,62 +1910,184 @@ async function scrapeProductPage(productUrl: string): Promise<any> {
   }
 }
 
-export async function GET(request: NextRequest) {
+// Function to process product cards in the background
+async function processProductCards(jobId: string, storeUrl: string, maxProducts: number = 10, storeCategories?: string[]) {
   try {
-    const url = new URL(request.url);
-    const jobId = url.searchParams.get('jobId');
-    const storeUrl = url.searchParams.get('storeUrl');
-    
-    if (!jobId) {
-      return NextResponse.json(
-        { message: 'Job ID is required' },
-        { status: 400 }
-      );
-    }
-    
-    // First check if the job exists in the new job status system
-    const jobStatus = getJobStatus(jobId);
-    
-    if (jobStatus) {
-      // Return the job status from the new system
-      return NextResponse.json({
-        status: jobStatus.status,
-        progress: jobStatus.progress,
-        message: jobStatus.message,
-        savedCount: jobStatus.savedCount || 0,
-        skippedCount: jobStatus.skippedCount || 0,
-        totalProcessed: jobStatus.totalProcessed || 0
-      });
-    }
-    
-    // Fallback to the old system if not found in the new one
-    if (!global.productScrapeJobs || !global.productScrapeJobs[jobId]) {
-      return NextResponse.json(
-        { message: 'Job not found' },
-        { status: 404 }
-      );
-    }
-    
+    // Get the job from memory
     const job = global.productScrapeJobs[jobId];
-    
-    // Return the job status and progress
-    return NextResponse.json({
-      status: job.status,
-      progress: job.progress,
-      savedProducts: job.savedProducts,
-      skippedProducts: job.skippedProducts,
-      error: job.error,
-      totalProcessed: job.savedProducts.length + job.skippedProducts.length,
-      savedCount: job.savedProducts.length,
-      skippedCount: job.skippedProducts.length,
-      targetProducts: job.savedProducts.length >= 1 ? job.savedProducts.length : 0,
-      storeUrl: job.storeUrl
-    });
+    if (!job) {
+      console.error(`Job ${jobId} not found`);
+      return;
+    }
+
+    // Update job status
+    try {
+      await updateJobStatus(jobId, {
+        status: 'processing',
+        progress: 0,
+        message: 'Processing product cards...',
+        savedCount: 0,
+        skippedCount: 0,
+        totalProcessed: 0,
+      });
+    } catch (error) {
+      console.error(`Error updating job status: ${error}`);
+    }
+
+    const savedProducts: Array<{ url: string; name: string }> = [];
+    const skippedProducts: Array<{ url: string; reason: string }> = [];
+
+    let savedCount = 0;
+    let totalProcessed = 0;
+
+    // Process each product card
+    for (const card of job.productCards) {
+      if (savedCount >= maxProducts) break;
+      
+      totalProcessed++;
+
+      try {
+        // Check if product already exists
+        const exists = await checkUrlExists(card.url);
+        if (exists) {
+          skippedProducts.push({ url: card.url, reason: 'Already exists in database' });
+          continue;
+        }
+
+        // Scrape additional details from product page
+        console.log(`[DEBUG] Processing product: ${card.url}`);
+        const additionalDetails = await scrapeProductDetails(card.url);
+
+        // Map card data to database schema
+        const product = mapCardToDbSchema(card, storeUrl, additionalDetails, storeCategories);
+
+        // Save product to database
+        const result = await saveProductToDatabase(product, storeUrl, storeCategories);
+        if (!result.success) {
+          skippedProducts.push({ url: card.url, reason: result.message });
+          continue;
+        }
+
+        // Add to saved products list
+        savedProducts.push({ url: card.url, name: card.name });
+        savedCount++;
+
+        // Update job progress
+        const progress = Math.min(100, Math.round((savedCount / maxProducts) * 100));
+        try {
+          await updateJobStatus(jobId, {
+            status: 'processing',
+            progress,
+            message: `Saved ${savedCount} of ${maxProducts} products...`,
+            savedCount,
+            skippedCount: skippedProducts.length,
+            totalProcessed,
+          });
+        } catch (error) {
+          console.error(`Error updating job progress: ${error}`);
+        }
+
+        // Update job in memory
+        job.savedProducts = savedProducts;
+        job.skippedProducts = skippedProducts;
+        job.progress = progress;
+
+      } catch (error: any) {
+        console.error(`Error processing product ${card.url}:`, error);
+        skippedProducts.push({ url: card.url, reason: error.message || 'Error processing product' });
+      }
+    }
+
+    // Update job status to completed
+    try {
+      await updateJobStatus(jobId, {
+        status: 'completed',
+        progress: 100,
+        message: `Completed. Saved ${savedCount} products, skipped ${skippedProducts.length}.`,
+        savedCount,
+        skippedCount: skippedProducts.length,
+        totalProcessed,
+      });
+    } catch (error) {
+      console.error(`Error updating job completion status: ${error}`);
+    }
+
+    // Update job in memory
+    job.status = 'completed';
+    job.savedProducts = savedProducts;
+    job.skippedProducts = skippedProducts;
+    job.progress = 100;
+
+    // Update scrape_stores table with the latest scrape information
+    try {
+      // Extract brand from URL
+      const brand = extractBrandFromUrl(storeUrl);
+      
+      // Check if the store exists in scrape_stores
+      const { data: existingStore, error: checkError } = await supabase
+        .from('scrape_stores')
+        .select('id')
+        .eq('store_url', storeUrl)
+        .maybeSingle();
+      
+      if (checkError && !checkError.message.includes('does not exist')) {
+        console.error('Error checking scrape_stores table:', checkError);
+      } else {
+        if (existingStore) {
+          // Update existing store
+          const { error: updateError } = await supabase
+            .from('scrape_stores')
+            .update({
+              last_scraped_at: new Date().toISOString(),
+              items_count: savedCount,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existingStore.id);
+          
+          if (updateError) {
+            console.error('Error updating scrape_stores:', updateError);
+          }
+        } else {
+          // Insert new store
+          const { error: insertError } = await supabase
+            .from('scrape_stores')
+            .insert([
+              {
+                brand,
+                store_url: storeUrl,
+                last_scraped_at: new Date().toISOString(),
+                items_count: savedCount
+              }
+            ]);
+          
+          if (insertError && !insertError.message.includes('does not exist')) {
+            console.error('Error inserting into scrape_stores:', insertError);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error updating scrape history:', error);
+    }
+
   } catch (error) {
-    console.error('Error in scrape-store status API:', error);
-    return NextResponse.json(
-      { message: 'Internal server error', error },
-      { status: 500 }
-    );
+    console.error(`Error in processProductCards for job ${jobId}:`, error);
+    
+    // Update job status to error
+    try {
+      await updateJobStatus(jobId, {
+        status: 'error',
+        progress: 0,
+        message: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+    } catch (updateError) {
+      console.error(`Error updating job error status: ${updateError}`);
+    }
+    
+    // Update job in memory
+    const job = global.productScrapeJobs[jobId];
+    if (job) {
+      job.status = 'error';
+      job.error = error instanceof Error ? error.message : 'Unknown error';
+    }
   }
 }
