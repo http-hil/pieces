@@ -1,0 +1,11 @@
+.TestBoard_div1 {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.TestBoard_div2 {
+  width: 80vw;
+  height: 80vh;
+}
